@@ -15,6 +15,7 @@ route('a-dash', {
     return `<div class="page"><div class="page-hd"><div><h1>Dashboard Admin</h1><p class="sub">${esc(c.nama_sekolah || '')}${B().ta ? ' · Tahun Ajaran ' + esc(B().ta.nama) + ' Semester ' + esc(B().ta.semester) : ' · Tahun ajaran belum diatur'}</p></div>
         <div class="flex g8 wrap"><button class="btn btn-secondary" onclick="go('a-settings')">${I('sliders')}Pengaturan</button><button class="btn btn-primary" onclick="go('a-users');setTimeout(()=>openUserForm(null),40)">${I('user-plus')}Tambah Pengguna</button></div></div>
       ${!B().ta ? `<div class="banner banner-warn mb16">${I('alert')}<div class="f1">Tahun ajaran aktif belum diatur. Atur di Data Akademik agar kelas dan penugasan tercatat per semester.</div><button class="btn btn-sm btn-primary" onclick="go('a-akademik',{tab:'ta'})">Atur</button></div>` : ''}
+      ${d.demo ? `<div class="banner banner-info mb16" style="flex-wrap:wrap">${I('sparkles')}<div class="f1 small" style="min-width:220px"><b>Data contoh dari pemasangan awal masih ada:</b> ${d.demo} akun contoh beserta tugas, ujian, presensi, dan agendanya. Hapus setelah selesai mencoba aplikasi.</div><button class="btn btn-sm btn-primary" onclick="openDemoCleanup()">${I('trash', 'ic-sm')}Tinjau & Hapus</button></div>` : ''}
       <div class="grid gc5">${statCard('Siswa aktif', fmtN(st.siswa, 0), 'siswa', '', 'users', 'p', "go('a-users',{tab:'siswa'})")}${statCard('Guru aktif', fmtN(st.guru, 0), 'guru', '', 'user', '', "go('a-users',{tab:'guru'})")}${statCard('Rombel', st.kelas, 'kelas', '', 'door', '', "go('a-akademik',{tab:'kelas'})")}${statCard('Pendaftaran', st.pending, 'menunggu', st.pending ? 'Perlu persetujuan' : 'Tidak ada antrean', 'user-plus', st.pending ? 'warn' : '', "go('a-users',{tab:'daftar'})")}${statCard('Ujian 7 hari', st.ujianMinggu, 'sesi', 'Terbit & terjadwal', 'exam', st.ujianMinggu ? 'ok' : '', "go('g-ujian')")}</div>
       <div class="split mt16"><div class="col g16"><div class="card card-p"><div class="flex items-c jc-b wrap g8"><div><h3>Pengguna Aktif Harian</h3><p class="small muted">Jumlah akun unik yang masuk per hari (30 hari terakhir)</p></div>${pill(active + ' hari ini', 'info', 'activity')}</div>
             <div class="mt12">${CH.line(d.login.map((x) => ({ l: x.tanggal.slice(8) + '/' + x.tanggal.slice(5, 7), v: x.n })), { min: 0, label: 'Pengguna aktif harian' })}</div></div>
@@ -23,7 +24,7 @@ route('a-dash', {
         <div class="col g16"><div class="card card-p"><h3>Status Sistem</h3><div class="col g12 mt12">
             <div class="flex items-c g12"><div class="tile sm ${c.email_aktif ? 'ok' : ''}">${I('mail')}</div><div class="f1"><div class="bold small">Email pengingat ${c.email_aktif ? 'aktif' : 'nonaktif'}</div><div class="xs muted">Terkirim hari ini ${q.emailSent}${q.emailLeft !== null ? ' · sisa kuota ' + fmtN(q.emailLeft, 0) : ''}</div></div></div>
             <div class="flex items-c g12"><div class="tile sm ${c.wa_aktif ? 'ok' : ''}">${I('wa')}</div><div class="f1"><div class="bold small">WhatsApp ${c.wa_aktif ? 'aktif (' + esc(s.wa_provider || 'FONNTE') + ')' : 'nonaktif'}</div><div class="xs muted">Terkirim hari ini ${q.waSent}${c.wa_aktif && !s.wa_api_key_mask ? ' · <span class="ink-err">API key kosong</span>' : ''}</div></div></div>
-            <div class="flex items-c g12"><div class="tile sm ${c.google_login ? 'ok' : ''}">${I('g')}</div><div class="f1"><div class="bold small">Login Google ${c.google_login ? 'aktif' : 'belum diatur'}</div><div class="xs muted">${c.google_login ? 'Pendaftaran mandiri tersedia' : 'Atur URL deployment kedua di Pengaturan'}</div></div></div>
+            <div class="flex items-c g12"><div class="tile sm ${c.google_login ? 'ok' : ''}">${I('g')}</div><div class="f1"><div class="bold small">Login Google ${c.google_login ? 'aktif' : 'belum diatur'}</div><div class="xs muted">${c.google_login ? 'Pendaftaran mandiri tersedia' : 'Isi Google Client ID di Pengaturan → Login & Akses (opsional)'}</div></div></div>
             <div class="flex items-c g12"><div class="tile sm ${d.backup && now() - num(d.backup) < 8 * 864e5 ? 'ok' : 'warn'}">${I('database')}</div><div class="f1"><div class="bold small">Cadangan data</div><div class="xs muted">${d.backup ? 'Terakhir ' + D.ago(num(d.backup)) : 'Belum pernah'} · otomatis mingguan</div></div><button class="btn btn-secondary btn-sm" onclick="doBackup(this)">Cadangkan</button></div></div></div>
           <div class="card"><div class="card-hd"><h3>Aktivitas Terbaru</h3><a href="javascript:void(0)" class="small bold" onclick="go('a-settings',{tab:'cadangan'})">Log ${I('chev-r', 'ic-sm')}</a></div>${d.recent.map((l) => `<div class="row-item"><div class="tile sm">${I(/LOGIN/.test(l.aksi) ? 'logout' : /UJIAN|ULANGAN/.test(l.aksi) ? 'exam' : /PENGGUNA|SANDI|DAFTAR/.test(l.aksi) ? 'user' : 'activity')}</div><div class="f1" style="min-width:0"><div class="small"><b>${esc(l.nama || '-')}</b> · ${esc(String(l.aksi).replace(/_/g, ' ').toLowerCase())}</div><div class="xs muted truncate">${esc(l.detail || '')} · ${D.ago(num(l.waktu))}</div></div></div>`).join('') || `<div class="card-bd small muted">Belum ada aktivitas.</div>`}</div></div></div></div>`;
   }
@@ -202,6 +203,75 @@ function showCreds(list, title) {
     ${list.length === 1 ? `<div class="code-box mt16" style="line-height:2"><div class="small muted">${esc(list[0].nama)}${list[0].kelas ? ' · ' + esc(list[0].kelas) : ''}</div><div>Username: <b class="mono">${esc(list[0].username)}</b></div><div>Kata sandi: <b class="mono" style="font-size:18px;letter-spacing:.06em">${esc(list[0].password)}</b></div></div>`
       : `<div class="tbl-wrap mt16" style="max-height:50vh"><table class="tbl compact"><thead><tr><th>Nama</th><th>Kelas</th><th>Username</th><th>Kata sandi</th></tr></thead><tbody>${list.map((c) => `<tr><td class="small">${esc(c.nama)}</td><td class="small">${esc(c.kelas || '-')}</td><td class="mono small">${esc(c.username)}</td><td class="mono bold">${esc(c.password)}</td></tr>`).join('')}</tbody></table></div>`}`,
   foot: `<button class="btn btn-secondary" onclick="copyText(S.c.credTxt)">${I('copy')}Salin</button><button class="btn btn-primary" onclick="exportXlsx('kredensial_akun_${D.ymd(now())}',[{name:'Akun',rows:[['Nama','Kelas','Username','Kata Sandi']].concat(S.c.credList.map(c=>[c.nama,c.kelas,c.username,c.password]))}])">${I('download')}Unduh Excel</button>` });
+}
+/**
+ * Tinjau & hapus data contoh (akun dibuat_oleh "setup" beserta semua datanya).
+ * Pratinjau dihitung server; pilihan akun/opsi menghitung ulang otomatis.
+ */
+function openDemoCleanup() {
+  const W = { pv: null, sel: null, kelas: true, mapel: false, busy: false, ok: '' };
+  const LBL = [['akun', 'Akun contoh', 'users'], ['tugas', 'Tugas', 'clipboard'], ['pengumpulan', 'Pengumpulan', 'inbox'], ['materi', 'Materi', 'book'], ['ulangan', 'Ulangan CBT', 'exam'], ['hasil_ujian', 'Hasil ujian', 'chart'], ['soal', 'Soal bank', 'list-check'], ['presensi', 'Presensi', 'calendar'], ['penugasan', 'Penugasan', 'door'], ['agenda', 'Agenda', 'megaphone']];
+  const s = sheet({ title: 'Hapus Data Contoh', icon: 'trash', size: 'wide', body: `<div id="dcBody">${skel(18, '60%')}<div class="mt16">${skel(120)}</div></div>`,
+    foot: `<button class="btn btn-ghost" data-close>Batal</button><button class="btn btn-danger" id="dcGo" disabled>${I('trash')}Hapus Data Contoh</button>`,
+    mount: (el, close) => {
+      $('[data-close]', el).onclick = close;
+      const ids = () => W.pv.akun.filter((a) => W.sel[a.user_id]).map((a) => a.user_id);
+      const allSel = () => ids().length === W.pv.akun.length;
+      const canGo = () => !W.busy && W.pv && W.pv.akun.length && ids().length && W.ok.trim().toUpperCase() === 'HAPUS';
+      const syncBtn = () => { $('#dcGo', el).disabled = !canGo(); };
+      const load = (payload) => { W.busy = true; syncBtn(); const box = $('#dcSum', el); if (box) box.style.opacity = '.5';
+        return call('demo.preview', payload || {}, { silent: true }).then((pv) => { W.pv = pv; if (!W.sel) { W.sel = {}; pv.akun.forEach((a) => { W.sel[a.user_id] = a.dipilih; }); } W.busy = false; draw(); }).catch((e) => { W.busy = false; failToast(e); if (!W.pv) close(); else draw(); }); };
+      const recount = debounce(() => load(allSel() ? {} : { user_ids: ids() }), 500);
+      const draw = () => {
+        const pv = W.pv, c = pv.counts;
+        if (!pv.akun.length) { $('#dcBody', el).innerHTML = emptyState('check-c', 'Tidak ada data contoh', 'Semua akun contoh sudah dihapus. Data di aplikasi sekarang hanya data milik sekolah Anda.'); $('#dcGo', el).hidden = true; return; }
+        const grp = (role) => pv.akun.filter((a) => (role === 'GURU') === /GURU/.test(a.role));
+        const accRow = (a) => `<label class="flex items-c g8" style="padding:6px 0;cursor:pointer"><input type="checkbox" data-u="${a.user_id}" ${W.sel[a.user_id] ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--p600)"><span class="small f1" style="min-width:0"><b>${esc(a.nama)}</b> <span class="muted mono xs">${esc(a.username)}</span>${a.kelas ? ` · <span class="xs muted">${esc(a.kelas)}</span>` : ''}</span>${a.login_terakhir ? `<span class="xs muted">masuk ${D.ago(num(a.login_terakhir))}</span>` : ''}</label>`;
+        const nSel = ids().length;
+        $('#dcBody', el).innerHTML = `<p class="small tx2">Data ini dibuat otomatis saat pemasangan awal agar aplikasi bisa langsung dicoba. Yang dihapus: <b>akun contoh</b> beserta <b>semua datanya</b>. Akun admin, akun yang Anda buat atau import, pengaturan, dan tahun ajaran tetap aman.</p>
+          <div class="banner banner-info mt12">${I('database')}<div class="f1 small">Sebelum menghapus, ketiga spreadsheet database <b>dicadangkan otomatis</b> ke folder <b>Cadangan</b> di Google Drive.</div></div>
+          <div id="dcSum" class="info-tiles mt16" style="transition:opacity .2s">${LBL.map((l) => `<div class="info-tile"><div class="tile sm ${c[l[0]] ? 'warn' : ''}">${I(l[2])}</div><div style="min-width:0"><div class="xs muted">${l[1]}</div><div class="bold">${fmtN(c[l[0]] || 0, 0)}</div></div></div>`).join('')}</div>
+          ${pv.presensiDibersihkan ? `<p class="xs muted mt8">${pv.presensiDibersihkan} catatan presensi milik guru asli tetap disimpan; hanya nama siswa contoh yang dibuang dari catatannya.</p>` : ''}
+          ${pv.soalTetap ? `<p class="xs muted mt8">${pv.soalTetap} soal contoh dipertahankan karena dipakai ulangan yang bukan data contoh.</p>` : ''}
+          <div class="card card-p mt16"><label class="flex items-s g12" style="cursor:pointer"><input type="checkbox" id="dcKelas" ${W.kelas ? 'checked' : ''} style="width:18px;height:18px;margin-top:2px;accent-color:var(--p600)"><div class="f1"><div class="bold small">Hapus kelas contoh yang kosong</div>
+              <div class="chips mt8">${pv.kelasHapus.map((k) => `<span class="chip">${I('door', 'ic-sm')}${esc(k.nama)}</span>`).join('') || '<span class="xs muted">Tidak ada kelas contoh yang kosong.</span>'}</div>
+              ${pv.kelasTetap.length ? `<div class="xs tx2 mt8">${I('info', 'ic-sm ink-p')} Tetap dipertahankan: ${pv.kelasTetap.map((k) => `<b>${esc(k.nama)}</b> (${esc(k.alasan)})`).join(', ')}. Ganti namanya di Data Akademik → Kelas bila tidak sesuai kelas sekolah Anda.</div>` : ''}</div></label></div>
+          <div class="card card-p mt12"><label class="flex items-s g12" style="cursor:pointer"><input type="checkbox" id="dcMapel" ${W.mapel ? 'checked' : ''} style="width:18px;height:18px;margin-top:2px;accent-color:var(--p600)"><div class="f1"><div class="bold small">Hapus juga mata pelajaran contoh yang tidak dipakai</div>
+              <div class="xs muted mt4">${pv.mapelHapus.length ? esc(pv.mapelHapus.map((m) => m.nama).join(', ')) + '. Biarkan tidak dicentang bila sekolah Anda memakai mapel yang sama.' : 'Tidak ada mapel contoh yang bisa dihapus.'}</div></div></label></div>
+          ${pv.waliDilepas.length ? `<p class="xs tx2 mt12">${I('alert', 'ic-sm ink-warn')} Wali kelas contoh dilepas dari: ${esc(pv.waliDilepas.join(', '))}. Tetapkan wali kelas asli di Data Akademik.</p>` : ''}
+          <details class="mt16"><summary class="small bold" style="cursor:pointer">Akun contoh yang dihapus: ${nSel} dari ${pv.akun.length} ${nSel === pv.akun.length ? '(semua)' : ''}</summary>
+            <p class="xs muted mt8">Hapus centang akun yang sudah Anda ubah menjadi akun asli (misalnya guru contoh yang namanya diganti guru sungguhan).</p>
+            <div class="flex g8 mt8"><button class="btn btn-ghost btn-sm" id="dcAll">Pilih semua</button><button class="btn btn-ghost btn-sm" id="dcNone">Kosongkan</button></div>
+            <div class="grid gc2 mt8"><div><div class="xs muted bold mb8">GURU (${grp('GURU').length})</div>${grp('GURU').map(accRow).join('')}</div><div><div class="xs muted bold mb8">SISWA (${grp('SISWA').length})</div>${grp('SISWA').map(accRow).join('')}</div></div></details>
+          <div class="field mt16"><label class="label">Ketik <span class="mono">HAPUS</span> untuk melanjutkan</label><input class="input" id="dcOk" autocomplete="off" value="${esc(W.ok)}" placeholder="HAPUS" style="max-width:220px"><div class="help">Data yang dihapus tidak bisa dikembalikan dari aplikasi, hanya dari berkas cadangan.</div></div>`;
+        const det = $('details', el); if (det && W.open) det.open = true; if (det) det.ontoggle = () => { W.open = det.open; };
+        $$('[data-u]', el).forEach((x) => { x.onchange = () => { W.sel[x.dataset.u] = x.checked; recount(); syncBtn(); }; });
+        $('#dcAll', el).onclick = () => { pv.akun.forEach((a) => { W.sel[a.user_id] = true; }); draw(); recount(); };
+        $('#dcNone', el).onclick = () => { pv.akun.forEach((a) => { W.sel[a.user_id] = false; }); draw(); recount(); };
+        $('#dcKelas', el).onchange = (e) => { W.kelas = e.target.checked; };
+        $('#dcMapel', el).onchange = (e) => { W.mapel = e.target.checked; };
+        $('#dcOk', el).oninput = (e) => { W.ok = e.target.value; syncBtn(); };
+        syncBtn();
+      };
+      $('#dcGo', el).onclick = () => {
+        if (!canGo()) return;
+        const btn = $('#dcGo', el), payload = { konfirmasi: 'HAPUS', kelas: W.kelas, mapel: W.mapel };
+        if (!allSel()) payload.user_ids = ids();
+        W.busy = true; btnBusy(btn, true, 'Mencadangkan & menghapus…');
+        call('demo.delete', payload, { silent: true }).then((r) => {
+          close(); drop(''); refreshBoot(true).catch(() => {}); rerender();
+          const d = r.dihapus;
+          sheet({ title: 'Data Contoh Dihapus', icon: 'check-c', body: `<p class="small tx2">Selesai. Yang dihapus:</p>
+            <div class="info-tiles mt12">${[['akun', 'Akun'], ['tugas', 'Tugas'], ['ulangan', 'Ulangan'], ['soal', 'Soal'], ['presensi', 'Presensi'], ['materi', 'Materi'], ['agenda', 'Agenda'], ['kelas', 'Kelas']].map((l) => `<div class="info-tile"><div><div class="xs muted">${l[1]}</div><div class="bold">${fmtN(d[l[0]] || 0, 0)}</div></div></div>`).join('')}</div>
+            ${r.cadangan.length ? `<div class="banner banner-info mt16">${I('database')}<div class="f1 small">Cadangan sebelum penghapusan tersimpan di folder <b>Cadangan</b> Google Drive (${r.cadangan.length} spreadsheet).</div></div>` : ''}
+            ${r.kelasTetap.length ? `<p class="small tx2 mt12">Kelas yang dipertahankan: ${r.kelasTetap.map((k) => `<b>${esc(k.nama)}</b>`).join(', ')}. Anda bisa mengganti namanya di Data Akademik → Kelas.</p>` : ''}
+            ${r.sisaAkunContoh ? `<p class="small muted mt8">${r.sisaAkunContoh} akun contoh lain sengaja tidak dihapus.</p>` : ''}`,
+            foot: `<button class="btn btn-secondary" onclick="closeAllSheets();go('a-akademik',{tab:'kelas'})">${I('door')}Data Akademik</button><button class="btn btn-primary" onclick="closeAllSheets()">${I('check')}Selesai</button>` });
+        }).catch((e) => { W.busy = false; btnBusy(btn, false); syncBtn(); failToast(e); });
+      };
+      load();
+    } });
+  return s;
 }
 function openImportUsers() {
   const W = { rows: null, res: null }, kelasList = (B().kelas || []).slice().sort(by('nama_kelas'));
@@ -387,7 +457,9 @@ route('a-settings', {
       body = `<div class="split s-r"><div class="card">${logs ? dataTable('logs', logs, [{ h: 'Waktu', k: 'waktu', search: false, r: (l) => `<span class="small mono">${D.dt(num(l.waktu))}</span>` }, { h: 'Pengguna', k: 'nama', r: (l) => `<span class="small bold">${esc(l.nama)}</span>` }, { h: 'Aksi', k: 'aksi', r: (l) => pill(String(l.aksi).replace(/_/g, ' '), /GAGAL|HAPUS|KUNCI/.test(l.aksi) ? 'err' : /LOGIN/.test(l.aksi) ? 'info' : 'neu') }, { h: 'Detail', k: 'detail', r: (l) => `<span class="small tx2">${esc(l.detail || '')}</span>` }], { ph: 'Cari log…', per: 25 }) : `<div class="card-bd">${skel(240)}</div>`}</div>
         <div class="card card-p"><h3>${I('database', 'ink-p')} Cadangan Data</h3><p class="small tx2 mt8">Sistem menyalin ketiga spreadsheet database ke folder <b>Cadangan</b> di Google Drive secara otomatis setiap minggu dan menyimpan 8 salinan terakhir.</p>
           <div class="info-tile mt16"><div class="tile sm ${base.cadangan_terakhir ? 'ok' : 'warn'}">${I('history')}</div><div><div class="xs muted">Cadangan terakhir</div><div class="bold small">${base.cadangan_terakhir ? D.dt(num(base.cadangan_terakhir)) : 'Belum pernah'}</div></div></div>
-          <button class="btn btn-primary btn-block mt16" onclick="doBackup(this)">${I('cloud-ok')}Cadangkan Sekarang</button></div></div>`;
+          <button class="btn btn-primary btn-block mt16" onclick="doBackup(this)">${I('cloud-ok')}Cadangkan Sekarang</button>
+          <div class="divider"></div><h3>${I('sparkles', 'ink-p')} Data Contoh</h3><p class="small tx2 mt8">Akun guru & siswa contoh beserta tugas, ujian, presensi, dan agenda yang dibuat saat pemasangan awal. Akun admin dan data yang Anda buat sendiri tidak ikut terhapus.</p>
+          <button class="btn btn-danger-o btn-block mt16" onclick="openDemoCleanup()">${I('trash')}Tinjau & Hapus Data Contoh</button></div></div>`;
     }
     return `<div class="page"><div class="page-hd"><div><h1>Pengaturan</h1><p class="sub">Identitas aplikasi, aturan ujian, pengingat, dan keamanan.</p></div></div>
       <div class="tabs scroll">${SET_TABS.map((t) => `<button class="tab ${tab === t[0] ? 'on' : ''}" onclick="go('a-settings',{tab:'${t[0]}'},{replace:true})">${I(t[2], 'ic-sm')} ${t[1]}</button>`).join('')}</div>
