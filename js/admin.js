@@ -38,7 +38,7 @@ function regFind(id) { const a = S.c.adash && S.c.adash.d && S.c.adash.d.pending
 function normKelas(s) { return String(s || '').trim().toUpperCase().replace(/^(10|11|12)(?=\D|$)/, (m) => ({ 10: 'X', 11: 'XI', 12: 'XII' })[m]).replace(/[^A-Z0-9]/g, ''); }
 /** Tebak kelas dari tulisan bebas ("XI-2", "11 2", "XI-2 MIPA"), aturan sama dengan server. Kembalikan kelas_id bila tepat satu cocok. */
 function kelasGuess(raw) {
-  const ks = B().kelas || [], t = String(raw || '').trim(); if (!t) return '';
+  const ks = kelasReg(), t = String(raw || '').trim(); if (!t) return '';
   const n = normKelas(t);
   let hit = ks.filter((k) => k.kelas_id === t || normKelas(k.nama_kelas) === n);
   if (!hit.length) hit = ks.filter((k) => normKelas(String(k.nama_kelas).split(/\s+/)[0]) === n);
@@ -50,7 +50,7 @@ function regDecide(id, approve, kelasId) {
   if (approve && r.role_diminta !== 'GURU' && !kelasId) {
     const gid = kelasGuess(r.kelas_diminta), k = gid ? (B().kelas || []).find((x) => x.kelas_id === gid) : null;
     if (!k) {
-      sheet({ title: 'Pilih kelas untuk ' + esc(r.nama), icon: 'door', body: `<p class="small tx2">Kelas yang diminta: <b>${esc(r.kelas_diminta || '-')}</b> tidak ditemukan. Pilih kelas siswa ini.</p><select class="select mt12" id="regK">${(B().kelas || []).map((x) => `<option value="${x.kelas_id}">${esc(x.nama_kelas)}</option>`).join('')}</select>`,
+      sheet({ title: 'Pilih kelas untuk ' + esc(r.nama), icon: 'door', body: `<p class="small tx2">Kelas yang diminta: <b>${esc(r.kelas_diminta || '-')}</b> tidak ditemukan. Pilih kelas siswa ini.</p><select class="select mt12" id="regK">${kelasReg().map((x) => `<option value="${x.kelas_id}">${esc(x.nama_kelas)}</option>`).join('')}</select>`,
         foot: `<button class="btn btn-primary" id="regKOk">${I('check')}Setujui</button>`, mount: (el, close) => { $('#regKOk', el).onclick = () => { const v = $('#regK', el).value; close(); regDecide(id, true, v); }; } });
       return;
     }
@@ -102,7 +102,7 @@ route('a-users', {
       { h: 'Login terakhir', k: 'login_terakhir', search: false, r: (u) => `<span class="small ${u.login_terakhir ? '' : 'muted'}">${u.login_terakhir ? D.ago(num(u.login_terakhir)) : 'Belum pernah'}</span>` },
       { h: 'Status', k: 'status', r: (u) => u.status === 'AKTIF' ? pill('Aktif', 'ok') : pill('Nonaktif', 'neu') },
       { h: '', sort: false, search: false, r: (u) => `<div class="flex g4 jc-e"><button class="icon-btn" title="Ubah" onclick="event.stopPropagation();openUserForm('${u.user_id}')">${I('edit')}</button><button class="icon-btn" title="Lainnya" onclick="event.stopPropagation();userMenu(this,'${u.user_id}')">${I('more')}</button></div>` });
-    const tools = `${isS ? `<select class="select input-sm" style="width:160px" onchange="S.c.usrF.kelas=this.value;rerender()"><option value="">Semua kelas</option>${(B().kelas || []).map((k) => `<option value="${k.kelas_id}" ${F.kelas === k.kelas_id ? 'selected' : ''}>${esc(k.nama_kelas)}</option>`).join('')}</select>` : ''}
+    const tools = `${isS ? `<select class="select input-sm" style="width:160px" onchange="S.c.usrF.kelas=this.value;rerender()"><option value="">Semua kelas</option>${kelasReg().map((k) => `<option value="${k.kelas_id}" ${F.kelas === k.kelas_id ? 'selected' : ''}>${esc(k.nama_kelas)}</option>`).join('')}</select>` : ''}
       <div class="seg">${[['AKTIF', 'Aktif'], ['NONAKTIF', 'Nonaktif'], ['', 'Semua']].map((x) => `<button class="${F.status === x[0] ? 'on' : ''}" onclick="S.c.usrF.status='${x[0]}';rerender()">${x[1]}</button>`).join('')}</div>
       <button class="btn btn-ghost btn-sm" onclick='uSelectAll(${JSON.stringify(rows.filter((u) => u.user_id !== me().user_id).map((u) => u.user_id))})'>${I('checkbox', 'ic-sm')}Pilih ${rows.length}</button>`;
     return `<div class="page">${head}
@@ -120,7 +120,7 @@ function uBulk(act, kelasId) {
   S.c.uSel = {}; rerender(); toast(`${ids.length} akun ${act === 'AKTIF' ? 'diaktifkan' : act === 'NONAKTIF' ? 'dinonaktifkan' : 'dipindah ke ' + kelasNm(kelasId)}.`, 'ok');
   call('users.bulk', { ids, act, kelas_id: kelasId }, { silent: true }).then(() => { drop('wr_'); drop('lap_'); refreshBoot(true).catch(() => {}); }).catch((e) => { d.users = bak; rerender(); failToast(e); });
 }
-function uBulkKelas(el) { menuAt(el, (B().kelas || []).map((k) => ({ icon: 'door', label: k.nama_kelas, run: () => uBulk('KELAS', k.kelas_id) }))); }
+function uBulkKelas(el) { menuAt(el, kelasReg().map((k) => ({ icon: 'door', label: k.nama_kelas, run: () => uBulk('KELAS', k.kelas_id) }))); }
 function userMenu(el, id) {
   const u = usersData().users.find((x) => x.user_id === id); if (!u) return;
   menuAt(el, [{ icon: 'edit', label: 'Ubah data', run: () => openUserForm(id) }, { icon: 'key', label: 'Reset kata sandi', run: () => resetPw(id, u.nama) },
@@ -152,7 +152,7 @@ function openUserForm(id, opt) {
       <div class="field"><label class="label">Nama lengkap <span class="req">*</span></label><input class="input" name="nama" value="${esc(u ? u.nama : '')}" autofocus></div>
       <div class="form-grid c2"><div class="field"><label class="label" id="ufNisL">NIS / NIP</label><input class="input mono" name="nis_nip" value="${esc(u ? u.nis_nip || '' : '')}" inputmode="numeric" oninput="const n=$('#ufForm [name=username]');if(n&&!n.dataset.touched)n.value=this.value.toLowerCase().replace(/[^a-z0-9._-]/g,'')"></div>
         <div class="field"><label class="label">Username <span class="req">*</span></label><input class="input mono" name="username" value="${esc(u ? u.username || '' : '')}" autocapitalize="off" oninput="this.dataset.touched=1"><div class="help">Huruf kecil/angka, min 3 karakter</div></div></div>
-      <div class="field" id="ufKelas"><label class="label">Kelas <span class="req">*</span></label><select class="select" name="kelas_id" ${wali ? 'disabled' : ''}><option value="">Pilih kelas</option>${(B().kelas || []).map((k) => `<option value="${k.kelas_id}" ${(u ? u.kelas_id : opt.kelas) === k.kelas_id ? 'selected' : ''}>${esc(k.nama_kelas)}</option>`).join('')}</select></div>
+      <div class="field" id="ufKelas"><label class="label">Kelas <span class="req">*</span></label><select class="select" name="kelas_id" ${wali ? 'disabled' : ''}><option value="">Pilih kelas</option>${kelasReg().map((k) => `<option value="${k.kelas_id}" ${(u ? u.kelas_id : opt.kelas) === k.kelas_id ? 'selected' : ''}>${esc(k.nama_kelas)}</option>`).join('')}</select></div>
       <div class="form-grid c2"><div class="field"><label class="label">Email Google</label><input class="input" type="email" name="email_google" value="${esc(u ? u.email_google || '' : '')}" placeholder="nama@gmail.com"><div class="help">Untuk masuk dengan Google & email pengingat</div></div>
         <div class="field"><label class="label">No. WhatsApp</label><input class="input" name="no_wa" inputmode="tel" value="${esc(u ? u.no_wa || '' : '')}" placeholder="08xxxxxxxxxx"></div></div>
       ${u ? `<div class="banner banner-info">${I('key')}<div class="f1">Lupa kata sandi? <a href="javascript:void(0)" class="bold" onclick="closeAllSheets();resetPw('${u.user_id}',${jsq(u.nama)})">Reset kata sandi</a> untuk membuat sandi sementara baru.</div></div>`
@@ -274,7 +274,7 @@ function openDemoCleanup() {
   return s;
 }
 function openImportUsers() {
-  const W = { rows: null, res: null }, kelasList = (B().kelas || []).slice().sort(by('nama_kelas'));
+  const W = { rows: null, res: null }, kelasList = kelasReg().slice().sort(by('nama_kelas'));
   const s = sheet({ title: 'Import Akun dari Excel', icon: 'upload', size: 'wide', body: `<div id="iuBody"></div>`, foot: `<button class="btn btn-secondary" id="iuTpl">${I('download')}Unduh Template</button><button class="btn btn-primary" id="iuGo" disabled>${I('cloud-ok')}Import</button>`,
     mount: (el) => {
       const draw = () => {
@@ -306,18 +306,18 @@ route('a-akademik', {
   title: 'Data Akademik', roles: ['ADMIN'],
   render(p) {
     const tab = p.tab || 'kelas', ad = B().admin || {}, kelas = (B().kelas || []).slice().sort(by('nama_kelas')), mapel = (B().mapel || []).slice().sort(by('nama_mapel'));
-    const nS = {}; G().siswa.forEach((s) => { nS[s.kelas_id] = (nS[s.kelas_id] || 0) + 1; });
+    const nS = {}; G().siswa.forEach((s) => { nS[s.kelas_id] = (nS[s.kelas_id] || 0) + 1; }); kelas.forEach((k) => { if (isKhusus(k)) nS[k.kelas_id] = k.jml || 0; });
     const tabs = [['ta', 'Tahun Ajaran', (ad.tas || []).length], ['kelas', 'Kelas & Wali', kelas.length], ['mapel', 'Mata Pelajaran', mapel.length], ['penugasan', 'Penugasan Mengajar', G().penugasan.length]];
     let body = '';
     if (tab === 'ta') body = `<div class="flex jc-e mb12"><button class="btn btn-primary" onclick="openTaForm(null)">${I('plus')}Tahun Ajaran Baru</button></div><div class="grid gc3">${(ad.tas || []).slice().sort(by((t) => t.nama + t.semester, -1)).map((t) => `<div class="card card-p ${t.aktif ? 'sel' : ''}"><div class="flex items-c g8"><div class="tile ${t.aktif ? 'ok' : ''}">${I('calendar')}</div><div class="f1"><h3>${esc(t.nama)}</h3><div class="small muted">Semester ${esc(t.semester)}</div></div>${t.aktif ? pill('Aktif', 'ok', 'check') : ''}</div>
         <p class="small tx2 mt12">${t.tgl_mulai ? D.d(num(t.tgl_mulai)) + ' – ' + D.d(num(t.tgl_selesai)) : 'Tanggal belum diatur'}</p><div class="flex g8 mt12"><button class="btn btn-ghost btn-sm" onclick="openTaForm('${t.ta_id}')">${I('edit', 'ic-sm')}Ubah</button>${t.aktif ? '' : `<button class="btn btn-secondary btn-sm ml-a" onclick="taActivate('${t.ta_id}')">${I('check-c', 'ic-sm')}Jadikan Aktif</button>`}</div></div>`).join('') || `<div class="card" style="grid-column:1/-1">${emptyState('calendar', 'Belum ada tahun ajaran', 'Tambahkan tahun ajaran, lalu jadikan aktif.')}</div>`}</div>`;
     else if (tab === 'kelas') body = `<div class="card">${dataTable('akKelas', kelas, [
-        { h: 'Kelas', k: 'nama_kelas', r: (k) => `<div class="flex items-c g8"><div class="tile sm">${I('door')}</div><div><div class="bold">${esc(k.nama_kelas)}</div><div class="xs muted">Tingkat ${esc(k.tingkat || '-')}</div></div></div>` },
-        { h: 'Wali kelas', k: 'wali', r: (k) => k.wali ? `<div class="flex items-c g8">${avatar(k.wali, '', 'sm')}<span class="small bold">${esc(k.wali)}</span></div>` : `<button class="btn btn-ghost btn-sm ink-warn" onclick="event.stopPropagation();openKelasForm('${k.kelas_id}')">${I('plus', 'ic-sm')}Tetapkan wali</button>` },
+        { h: 'Kelas', k: 'nama_kelas', r: (k) => `<div class="flex items-c g8"><div class="tile sm">${I('door')}</div><div><div class="bold">${esc(k.nama_kelas)} ${kelasPill(k)}</div><div class="xs muted">${isKhusus(k) ? esc(JENIS_KELAS[k.jenis]) + (k.sumber_kelas_ids && k.sumber_kelas_ids.length ? ' · dari ' + esc(k.sumber_kelas_ids.map(kelasShort).join(', ')) : '') : 'Tingkat ' + esc(k.tingkat || '-')}</div></div></div>` },
+        { h: 'Wali / pembina', k: 'wali', r: (k) => k.wali ? `<div class="flex items-c g8">${avatar(k.wali, '', 'sm')}<span class="small bold">${esc(k.wali)}</span></div>` : `<button class="btn btn-ghost btn-sm ink-warn" onclick="event.stopPropagation();openKelasForm('${k.kelas_id}')">${I('plus', 'ic-sm')}Tetapkan wali</button>` },
         { h: 'Siswa', k: 'kelas_id', n: true, search: false, v: (k) => nS[k.kelas_id] || 0, r: (k) => `<span class="mono">${nS[k.kelas_id] || 0}</span>` },
         { h: 'Mapel diajar', k: 'tingkat', n: true, search: false, v: (k) => G().penugasan.filter((x) => x.kelas_id === k.kelas_id).length, r: (k) => `<span class="mono">${G().penugasan.filter((x) => x.kelas_id === k.kelas_id).length}</span>` },
         { h: '', sort: false, search: false, r: (k) => `<div class="flex g4 jc-e"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();go('w-kelas',{kelas_id:'${k.kelas_id}'})">${I('chart', 'ic-sm')}Rekap</button><button class="icon-btn" onclick="event.stopPropagation();openKelasForm('${k.kelas_id}')" title="Ubah">${I('edit')}</button><button class="icon-btn ink-err" onclick="event.stopPropagation();delMaster('kelas','${k.kelas_id}')" title="Hapus">${I('trash')}</button></div>` }
-      ], { ph: 'Cari kelas atau wali…', per: 40, onRow: (k) => `openKelasForm('${k.kelas_id}')`, tools: `<button class="btn btn-primary btn-sm" onclick="openKelasForm(null)">${I('plus', 'ic-sm')}Tambah Kelas</button>` })}</div>`;
+      ], { ph: 'Cari kelas atau wali…', per: 40, onRow: (k) => `openKelasForm('${k.kelas_id}')`, tools: `<button class="btn btn-secondary btn-sm" onclick="openKelasForm(null,'ESKUL')">${I('plus', 'ic-sm')}Eskul / Pengayaan</button><button class="btn btn-primary btn-sm" onclick="openKelasForm(null)">${I('plus', 'ic-sm')}Tambah Rombel</button>` })}</div>`;
     else if (tab === 'mapel') body = `<div class="flex jc-e mb12"><button class="btn btn-primary" onclick="openMapelForm(null)">${I('plus')}Tambah Mapel</button></div><div class="mapel-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${mapel.map((m) => `<button class="mapel-tile" onclick="openMapelForm('${m.mapel_id}')">${mapelIcon(m.mapel_id)}<span class="nm">${esc(m.nama_mapel)}</span><span class="gr mono">${esc(m.kode || '-')} · ${G().penugasan.filter((x) => x.mapel_id === m.mapel_id).length} kelas</span></button>`).join('') || emptyState('book', 'Belum ada mapel', '')}</div>`;
     else {
       const gurus = (B().gurus || []).slice().sort(by('nama')), byG = {}; G().penugasan.forEach((x) => { (byG[x.guru_id] = byG[x.guru_id] || []).push(x); });
@@ -349,20 +349,58 @@ function taActivate(id) {
     call('ta.activate', { ta_id: id }, { silent: true }).then(() => refreshBoot(true)).catch((e) => { B().admin.tas = bak; rerender(); failToast(e); });
   });
 }
-function openKelasForm(id) {
-  const k = id ? (B().kelas || []).find((x) => x.kelas_id === id) : null, waliOf = {}; (B().kelas || []).forEach((x) => { if (x.wali_kelas_id) waliOf[x.wali_kelas_id] = x.nama_kelas; });
-  sheet({ title: k ? 'Ubah Kelas ' + esc(k.nama_kelas) : 'Tambah Kelas', icon: 'door', body: `<form id="kF" class="col g16" onsubmit="return false"><div class="form-grid c2"><div class="field"><label class="label">Nama kelas <span class="req">*</span></label><input class="input" name="nama_kelas" value="${esc(k ? k.nama_kelas : '')}" placeholder="XI-2 atau XI MIPA 2" autofocus></div>
-      <div class="field"><label class="label">Tingkat</label><select class="select" name="tingkat">${['X', 'XI', 'XII'].map((t) => `<option ${k && k.tingkat === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div></div>
-      <div class="field"><label class="label">Wali kelas</label><select class="select" name="wali_kelas_id"><option value="">— Belum ada wali —</option>${(B().gurus || []).slice().sort(by('nama')).map((g) => `<option value="${g.user_id}" ${k && k.wali_kelas_id === g.user_id ? 'selected' : ''} ${waliOf[g.user_id] && (!k || k.wali_kelas_id !== g.user_id) ? 'disabled' : ''}>${esc(g.nama)}${waliOf[g.user_id] && (!k || k.wali_kelas_id !== g.user_id) ? ' (wali ' + esc(waliOf[g.user_id]) + ')' : ''}</option>`).join('')}</select>
-        <div class="help">Guru yang ditetapkan otomatis mendapat menu Wali Kelas (rekap presensi, leger nilai, tunggakan). Satu guru hanya untuk satu kelas.</div></div></form>`,
-  foot: `${k ? `<button class="btn btn-danger-o" onclick="closeAllSheets();delMaster('kelas','${k.kelas_id}')">${I('trash')}</button>` : ''}<button class="btn btn-primary" id="kOk">${I('check')}Simpan Kelas</button>`, mount: (el, close) => { $('#kOk', el).onclick = () => {
-    const f = formData($('#kF', el)), btn = $('#kOk', el); if (!f.nama_kelas.trim()) { toast('Isi nama kelas.', 'warn'); return; }
-    btnBusy(btn, true, 'Menyimpan…');
-    call('kelas.save', { kelas_id: id || '', nama_kelas: f.nama_kelas.trim(), tingkat: f.tingkat, wali_kelas_id: f.wali_kelas_id }).then((r) => {
-      const l = B().kelas, o = { kelas_id: r.kelas_id, nama_kelas: r.nama_kelas, tingkat: r.tingkat, wali_kelas_id: r.wali_kelas_id, wali: r.wali }, i = l.findIndex((x) => x.kelas_id === r.kelas_id);
-      if (i >= 0) l[i] = o; else l.push(o); saveSnap(); close(); renderChrome(); rerender(); toast('Kelas ' + r.nama_kelas + ' disimpan.', 'ok');
-      refreshBoot(true).catch(() => {});   // peran wali kelas ikut diperbarui
-    }).catch((e) => { btnBusy(btn, false); failToast(e); }); }; } });
+/**
+ * Formulir kelas. Jenis REGULER = rombel biasa (kelas asal siswa).
+ * ESKUL / PENGAYAAN = kelas gabungan: anggota diambil dari seluruh siswa rombel terpilih dan/atau siswa pilihan.
+ */
+function openKelasForm(id, jenis0) {
+  const k = id ? (B().kelas || []).find((x) => x.kelas_id === id) : null, waliOf = {};
+  (B().kelas || []).forEach((x) => { if (x.wali_kelas_id && !isKhusus(x)) waliOf[x.wali_kelas_id] = x.nama_kelas; });
+  const W = { jenis: k ? (k.jenis || 'REGULER') : (jenis0 || 'REGULER'), src: k && k.sumber_kelas_ids ? k.sumber_kelas_ids.slice() : [], ang: k && k.anggota_ids ? k.anggota_ids.slice() : [], q: '', fk: '' };
+  const siswaAll = (G().siswa || []).slice().sort(by('nama'));
+  const s = sheet({ title: k ? 'Ubah Kelas ' + esc(k.nama_kelas) : W.jenis === 'REGULER' ? 'Tambah Rombel' : 'Tambah Kelas Eskul / Pengayaan', icon: 'door', size: 'wide', body: `<form id="kF" onsubmit="return false"><div id="kBox" class="col g16"></div></form>`,
+    foot: `${k ? `<button class="btn btn-danger-o" onclick="closeAllSheets();delMaster('kelas','${k.kelas_id}')">${I('trash')}</button>` : ''}<button class="btn btn-primary" id="kOk">${I('check')}Simpan Kelas</button>`,
+    mount: (el, close) => {
+      const keep = () => { const f = $('#kF', el); W.nama = f.nama_kelas ? f.nama_kelas.value : W.nama; W.tingkat = f.tingkat ? f.tingkat.value : W.tingkat; W.wali = f.wali_kelas_id ? f.wali_kelas_id.value : W.wali; W.ket = f.keterangan ? f.keterangan.value : W.ket; };
+      const members = () => { const set = {}; siswaAll.forEach((x) => { if (W.src.indexOf(x.kelas_id) >= 0 || W.ang.indexOf(x.user_id) >= 0) set[x.user_id] = 1; }); return Object.keys(set).length; };
+      const drawList = () => {
+        const box = $('#kList', el); if (!box) return;
+        const q = W.q.toLowerCase(), list = siswaAll.filter((x) => (!W.fk || x.kelas_id === W.fk) && (!q || String(x.nama).toLowerCase().indexOf(q) >= 0 || String(x.nis_nip || '').indexOf(q) >= 0)).slice(0, 300);
+        box.innerHTML = list.map((x) => { const viaSrc = W.src.indexOf(x.kelas_id) >= 0; return `<label class="flex items-c g8" style="padding:6px 0;cursor:pointer;${viaSrc ? 'opacity:.6' : ''}"><input type="checkbox" data-sid="${x.user_id}" ${viaSrc || W.ang.indexOf(x.user_id) >= 0 ? 'checked' : ''} ${viaSrc ? 'disabled' : ''} style="width:18px;height:18px;accent-color:var(--p600)"><span class="small f1 truncate"><b>${esc(x.nama)}</b> <span class="xs muted">${esc(kelasNm(x.kelas_id))}${viaSrc ? ' · ikut rombel' : ''}</span></span></label>`; }).join('') || '<p class="small muted">Tidak ada siswa yang cocok.</p>';
+        $$('[data-sid]', box).forEach((c) => { c.onchange = () => { const i = W.ang.indexOf(c.dataset.sid); if (c.checked && i < 0) W.ang.push(c.dataset.sid); if (!c.checked && i >= 0) W.ang.splice(i, 1); $('#kCnt', el).textContent = members(); }; });
+      };
+      const draw = () => {
+        const kh = W.jenis !== 'REGULER', nm = W.nama !== undefined ? W.nama : (k ? k.nama_kelas : ''), wl = W.wali !== undefined ? W.wali : (k ? k.wali_kelas_id : '');
+        $('#kBox', el).innerHTML = `${!k || isKhusus(k) || !kh ? `<div class="field"><label class="label">Jenis kelas</label><div class="seg">${Object.keys(JENIS_KELAS).map((j) => `<button type="button" class="${W.jenis === j ? 'on' : ''}" data-j="${j}" ${k && !isKhusus(k) && j !== 'REGULER' && jmlSiswaKelas(k.kelas_id) ? 'disabled title="Rombel ini masih menjadi kelas asal siswa"' : ''}>${JENIS_KELAS[j]}</button>`).join('')}</div>
+            <div class="help">${kh ? 'Kelas gabungan: anggotanya siswa dari beberapa rombel. Bisa dipakai untuk penugasan mengajar, tugas, ujian CBT, presensi, agenda, dan jadwal.' : 'Rombel biasa: kelas asal siswa.'}</div></div>` : ''}
+          <div class="form-grid c2"><div class="field"><label class="label">Nama kelas <span class="req">*</span></label><input class="input" name="nama_kelas" value="${esc(nm)}" placeholder="${kh ? 'mis. Pramuka, Pengayaan UTBK' : 'XI-2 atau XI MIPA 2'}"></div>
+            <div class="field"><label class="label">Tingkat${kh ? ' (opsional)' : ''}</label><select class="select" name="tingkat">${(kh ? [''] : []).concat(['X', 'XI', 'XII']).map((t) => `<option value="${t}" ${(W.tingkat !== undefined ? W.tingkat : k ? k.tingkat : '') === t ? 'selected' : ''}>${t || 'Campuran'}</option>`).join('')}</select></div></div>
+          <div class="field"><label class="label">${kh ? 'Pembina / guru penanggung jawab' : 'Wali kelas'}</label><select class="select" name="wali_kelas_id"><option value="">— ${kh ? 'Belum ada pembina' : 'Belum ada wali'} —</option>${(B().gurus || []).slice().sort(by('nama')).map((g) => { const lock = !kh && waliOf[g.user_id] && (!k || k.wali_kelas_id !== g.user_id); return `<option value="${g.user_id}" ${wl === g.user_id ? 'selected' : ''} ${lock ? 'disabled' : ''}>${esc(g.nama)}${lock ? ' (wali ' + esc(waliOf[g.user_id]) + ')' : ''}</option>`; }).join('')}</select>
+            <div class="help">${kh ? 'Pembina mendapat menu kelas binaan (rekap presensi & nilai anggota). Pembina tidak bisa mengubah akun siswa dari rombel lain.' : 'Guru yang ditetapkan otomatis mendapat menu Wali Kelas. Satu guru hanya untuk satu rombel.'}</div></div>
+          ${kh ? `<div class="field"><label class="label">Keterangan (opsional)</label><input class="input" name="keterangan" maxlength="200" value="${esc(W.ket !== undefined ? W.ket : k ? k.keterangan || '' : '')}" placeholder="mis. Latihan Sabtu 07.30 di lapangan"></div>
+          <div class="field"><label class="label">Ambil seluruh siswa dari rombel</label><div class="chips">${kelasReg().slice().sort(by('nama_kelas')).map((x) => `<button type="button" class="chip ${W.src.indexOf(x.kelas_id) >= 0 ? 'sel-o' : ''}" data-src="${x.kelas_id}">${W.src.indexOf(x.kelas_id) >= 0 ? I('check', 'ic-sm') : ''}${esc(x.nama_kelas)}</button>`).join('')}</div><div class="help">Siswa baru di rombel ini otomatis ikut menjadi anggota.</div></div>
+          <div class="field"><label class="label">Tambah siswa tertentu</label>
+            <div class="flex g8 wrap"><div class="input-ic f1" style="min-width:180px">${I('search')}<input class="input" id="kQ" placeholder="Cari nama atau NIS…" value="${esc(W.q)}"></div><select class="select" id="kFk" style="width:170px"><option value="">Semua rombel</option>${kelasReg().slice().sort(by('nama_kelas')).map((x) => `<option value="${x.kelas_id}" ${W.fk === x.kelas_id ? 'selected' : ''}>${esc(x.nama_kelas)}</option>`).join('')}</select></div>
+            <div class="pick-list mt8" id="kList"></div></div>
+          <div class="banner banner-info">${I('users')}<div class="f1 small">Jumlah anggota: <b id="kCnt">${members()}</b> siswa.</div></div>` : ''}`;
+        $$('[data-j]', el).forEach((b) => { b.onclick = () => { keep(); W.jenis = b.dataset.j; draw(); }; });
+        $$('[data-src]', el).forEach((b) => { b.onclick = () => { keep(); const i = W.src.indexOf(b.dataset.src); if (i >= 0) W.src.splice(i, 1); else W.src.push(b.dataset.src); draw(); }; });
+        if ($('#kQ', el)) { $('#kQ', el).oninput = debounce((e) => { W.q = e.target.value; drawList(); }, 200); $('#kFk', el).onchange = (e) => { W.fk = e.target.value; drawList(); }; drawList(); }
+      };
+      draw();
+      $('#kOk', el).onclick = () => {
+        keep(); const kh = W.jenis !== 'REGULER', btn = $('#kOk', el);
+        if (!String(W.nama || '').trim()) { toast('Isi nama kelas.', 'warn'); return; }
+        if (kh && !W.src.length && !W.ang.length) { toast('Pilih rombel sumber atau minimal satu siswa.', 'warn'); return; }
+        btnBusy(btn, true, 'Menyimpan…');
+        call('kelas.save', { kelas_id: id || '', nama_kelas: W.nama.trim(), tingkat: W.tingkat || '', wali_kelas_id: W.wali || '', jenis: W.jenis, sumber_kelas_ids: kh ? W.src : [], anggota_ids: kh ? W.ang : [], keterangan: W.ket || '' }).then((r) => {
+          const l = B().kelas, i = l.findIndex((x) => x.kelas_id === r.kelas_id);
+          if (i >= 0) l[i] = r; else l.push(r); saveSnap(); close(); renderChrome(); rerender(); toast('Kelas ' + r.nama_kelas + ' disimpan' + (isKhusus(r) ? ' (' + r.jml + ' anggota)' : '') + '.', 'ok');
+          refreshBoot(true).catch(() => {});   // peran wali/pembina & daftar siswa ikut diperbarui
+        }).catch((e) => { btnBusy(btn, false); failToast(e); });
+      };
+    } });
+  return s;
 }
 function openMapelForm(id) {
   const m = id ? (B().mapel || []).find((x) => x.mapel_id === id) : null; let ikon = m ? m.ikon || 'book' : 'book';

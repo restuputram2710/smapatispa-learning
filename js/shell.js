@@ -6,7 +6,7 @@ const mapelBy = (id) => (B().mapel || []).find((m) => m.mapel_id === id) || { na
 const kelasBy = (id) => (B().kelas || []).find((k) => k.kelas_id === id) || { nama_kelas: '-' };
 const kelasNm = (id) => kelasBy(id).nama_kelas;
 const mapelNm = (id) => mapelBy(id).nama_mapel;
-const kelasShort = (id) => String(kelasNm(id)).split(' ')[0];
+const kelasShort = (id) => { const k = kelasBy(id); return k.jenis === 'ESKUL' || k.jenis === 'PENGAYAAN' ? String(k.nama_kelas) : String(k.nama_kelas).split(' ')[0]; };
 const siswaBy = (id) => (G().siswa || []).find((s) => s.user_id === id) || { nama: '-' };
 const MAPEL_ICONS = ['calc', 'atom', 'leaf', 'flask', 'book', 'globe', 'landmark', 'terminal', 'chart', 'palette', 'music', 'dumbbell', 'scale', 'compass', 'languages', 'moon'];
 const mapelTone = (id) => 'ico-t' + ((hashN(id) % 8) + 1);
@@ -33,18 +33,18 @@ function navConfig() {
     groups.push({ items: [
       { r: 's-home', ic: 'home', l: 'Beranda', bn: 'Beranda' }, { r: 's-mapel', ic: 'book', l: 'Mata Pelajaran', bn: 'Mapel' },
       { r: 's-tugas', ic: 'clipboard', l: 'Tugas', bn: 'Tugas', badge: belum }, { r: 's-ujian', ic: 'exam', l: 'Ujian', bn: 'Ujian', badge: uj, bp: true },
-      { r: 's-nilai', ic: 'chart', l: 'Nilai & Kehadiran' }, { r: 'agenda', ic: 'calendar', l: 'Agenda Sekolah' }, { r: 'akun', ic: 'user', l: 'Akun Saya', bn: 'Akun' }] });
+      { r: 'jadwal', ic: 'clock', l: 'Jadwal Pelajaran' }, { r: 's-nilai', ic: 'chart', l: 'Nilai & Kehadiran' }, { r: 'agenda', ic: 'calendar', l: 'Agenda Sekolah' }, { r: 'akun', ic: 'user', l: 'Akun Saya', bn: 'Akun' }] });
     return { groups, bottom: ['s-home', 's-mapel', 's-tugas', 's-ujian', 'akun'] };
   }
   const koreksi = (g.ulangan || []).reduce((n, u) => n + (u.koreksi || 0), 0);
   if (hasRole('ADMIN')) groups.push({ t: 'Admin', items: [
     { r: 'a-dash', ic: 'dash', l: 'Dashboard Admin', bn: 'Beranda' }, { r: 'a-users', ic: 'users', l: 'Pengguna', bn: 'Pengguna', badge: (b.admin || {}).pendingReg },
-    { r: 'a-akademik', ic: 'door', l: 'Data Akademik' }, { r: 'a-settings', ic: 'sliders', l: 'Pengaturan', bn: 'Atur' }] });
+    { r: 'a-akademik', ic: 'door', l: 'Data Akademik' }, { r: 'a-jadwal', ic: 'clock', l: 'Jadwal Pelajaran' }, { r: 'a-settings', ic: 'sliders', l: 'Pengaturan', bn: 'Atur' }] });
   if (hasRole('GURU')) groups.push({ t: 'Guru', items: [
     { r: 'g-dash', ic: 'dash', l: 'Dashboard', bn: 'Beranda' }, { r: 'g-konten', ic: 'clipboard', l: 'Materi & Tugas', bn: 'Tugas', badge: g.stats.perluDinilai },
-    { r: 'g-bank', ic: 'list-check', l: 'Bank Soal' }, { r: 'g-ujian', ic: 'exam', l: 'Ujian CBT', bn: 'Ujian', badge: koreksi }, { r: 'g-absensi', ic: 'user-plus', l: 'Presensi Siswa', bn: 'Absensi' }] });
+    { r: 'jadwal', ic: 'clock', l: 'Jadwal Mengajar' }, { r: 'g-bank', ic: 'list-check', l: 'Bank Soal' }, { r: 'g-ujian', ic: 'exam', l: 'Ujian CBT', bn: 'Ujian', badge: koreksi }, { r: 'g-absensi', ic: 'user-plus', l: 'Presensi Siswa', bn: 'Absensi' }] });
   else if (hasRole('ADMIN')) groups.push({ t: 'Akademik', items: [{ r: 'g-ujian', ic: 'exam', l: 'Ujian CBT', bn: 'Ujian', badge: koreksi }, { r: 'g-bank', ic: 'list-check', l: 'Bank Soal' }] });
-  if (hasRole('WALI')) groups.push({ t: 'Wali Kelas', items: (me().waliKelas || []).map((k) => ({ r: 'w-kelas', p: { kelas_id: k }, ic: 'users', l: 'Kelas ' + kelasShort(k), meta: plural((g.siswa || []).filter((s) => s.kelas_id === k).length, 'siswa') })) });
+  if (hasRole('WALI')) groups.push({ t: 'Wali Kelas', items: (me().waliKelas || []).map((k) => ({ r: 'w-kelas', p: { kelas_id: k }, ic: 'users', l: 'Kelas ' + kelasShort(k), meta: plural(jmlSiswaKelas(k), 'siswa') })) });
   groups.push({ t: 'Umum', items: [{ r: 'agenda', ic: 'calendar', l: 'Agenda Sekolah' }, { r: 'laporan', ic: 'trending', l: 'Laporan & Grafik' }, { r: 'akun', ic: 'user', l: 'Akun Saya' }] });
   const bottom = hasRole('GURU') ? ['g-dash', 'g-konten', 'g-ujian', 'g-absensi', '@menu'] : ['a-dash', 'a-users', 'g-ujian', 'a-settings', '@menu'];
   return { groups, bottom };

@@ -353,4 +353,613 @@ function akunUnlink() {
     call('profil.unlinkGoogle', {}, { silent: true }).then((r) => { Object.assign(u, { email_google: r.user.email_google }); saveSnap(); toast('Tautan Google dilepas.', 'ok'); }).catch((e) => { u.email_google = old; rerender(); failToast(e); });
   });
 }
+
+'use strict';
+// ════════════════════════════════════════════════════════
+// BAGIAN 8: KELAS GABUNGAN (eskul/pengayaan) · JADWAL PELAJARAN · IMPORT SOAL WORD/EXCEL
+// ════════════════════════════════════════════════════════
+
+// ── Kelas gabungan: anggotanya siswa dari beberapa rombel ──
+const JENIS_KELAS = { REGULER: 'Reguler', ESKUL: 'Ekstrakurikuler', PENGAYAAN: 'Pengayaan' };
+const isKhusus = (k) => !!k && (k.jenis === 'ESKUL' || k.jenis === 'PENGAYAAN');
+/** Rombel reguler saja: dipakai untuk kelas asal siswa (akun, import akun, pindah kelas). */
+const kelasReg = () => (B().kelas || []).filter((k) => !isKhusus(k));
+/** Apakah siswa (data ringkas) termasuk kelas kid: kelas asal atau kelas gabungan yang diikuti. */
+const inKelas = (s, kid) => !!s && (s.kelas_id === kid || (s.kelas_x || []).indexOf(kid) >= 0);
+const kelasPill = (k) => isKhusus(k) ? pill(k.jenis === 'ESKUL' ? 'Eskul' : 'Pengayaan', k.jenis === 'ESKUL' ? 'vio' : 'info') : '';
+/** Jumlah siswa sebuah kelas menurut data guru/admin (kelas gabungan memakai jumlah dari server). */
+function jmlSiswaKelas(kid) { const k = kelasBy(kid); if (isKhusus(k) && k.jml !== undefined) return k.jml; return (G().siswa || []).filter((s) => inKelas(s, kid)).length; }
+
+// ════════════════════════════════════════════════════════
+// JADWAL PELAJARAN
+// Baris ringkas dari server: k=kelas, h=hari(1–7), j=jam ke, p=penugasan, m=mapel, g=guru, gn=nama guru, l=kegiatan, r=ruang
+// ════════════════════════════════════════════════════════
+const HARI_N = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+const JD = () => B().jadwal || { cfg: { hari: [1, 2, 3, 4, 5], def: [], khusus: {} }, rows: [] };
+const jdSlots = (cfg, h) => ((cfg.khusus || {})[h]) || cfg.def || [];
+const hariIni = () => { const d = new Date(now()).getDay(); return d === 0 ? 7 : d; };
+const hmNow = () => { const d = new Date(now()); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const jamLbl = (s) => s.mulai.replace(':', '.') + '–' + s.selesai.replace(':', '.');
+/** Hari sekolah berikutnya (termasuk hari ini bila belum lewat jam terakhir). */
+function jdHariAktif(cfg, rows) {
+  const h0 = hariIni(), t = hmNow(), days = (cfg.hari || []).slice().sort();
+  const last = (h) => { const sl = jdSlots(cfg, h).filter((s) => s.ke && rows.some((r) => r.h === h && r.j === s.ke)); return sl.length ? sl[sl.length - 1].selesai : ''; };
+  if (days.indexOf(h0) >= 0 && last(h0) && t < last(h0)) return { h: h0, label: 'Hari Ini', today: true };
+  for (let i = 1; i <= 7; i++) { const h = ((h0 - 1 + i) % 7) + 1; if (days.indexOf(h) >= 0 && last(h)) return { h, label: i === 1 ? 'Besok' : HARI_N[h] + (i === 7 ? ' Depan' : ''), today: false }; }
+  return { h: h0, label: 'Hari Ini', today: true };
+}
+/**
+ * Susun jadwal satu hari: jam berurutan dengan isi yang sama digabung (mis. jam 1–2 Fisika).
+ * Hasil: [{mulai, selesai, ke:[…], rows:[…]} | {mulai, selesai, label}] — label = istirahat/kegiatan di pengaturan jam.
+ */
+function jdDay(rows, cfg, h, opt) {
+  opt = opt || {};
+  const out = [], sig = (rs) => rs.map((r) => r.k + '|' + (r.p || '') + '|' + (r.l || '') + '|' + (r.r || '')).sort().join('#');
+  jdSlots(cfg, h).forEach((s) => {
+    if (!s.ke) { if (opt.istirahat !== false) out.push({ mulai: s.mulai, selesai: s.selesai, label: s.label || 'Istirahat' }); return; }
+    const rs = rows.filter((r) => r.h === h && r.j === s.ke);
+    if (!rs.length && opt.kosong === false) return;
+    const prev = out[out.length - 1];
+    if (prev && prev.ke && rs.length && sig(prev.rows) === sig(rs) && prev.selesai === s.mulai) { prev.selesai = s.selesai; prev.ke.push(s.ke); return; }
+    out.push({ mulai: s.mulai, selesai: s.selesai, ke: [s.ke], rows: rs });
+  });
+  // buang istirahat di awal/akhir hari yang tidak berisi pelajaran (untuk tampilan ringkas)
+  if (opt.kosong === false) { while (out.length && !out[0].ke) out.shift(); while (out.length && !out[out.length - 1].ke) out.pop(); }
+  return out;
+}
+/** Status blok terhadap waktu sekarang (hanya untuk hari ini). */
+function jdStatus(blk, h, today) {
+  if (today === false || h !== hariIni()) return '';
+  const t = hmNow(); return t >= blk.selesai ? 'lalu' : t >= blk.mulai ? 'kini' : 'nanti';
+}
+/** Teks isi satu baris jadwal sesuai sudut pandang. mode: siswa | ajar (guru) | kelas (wali/admin) | guru (admin per guru) */
+function jdText(r, mode) {
+  const mp = r.p ? mapelNm(r.m) : (r.l || 'Kegiatan');
+  if (mode === 'ajar' || mode === 'guru') return { t: mp, s: [kelasNm(r.k), r.r].filter(Boolean).join(' · ') };
+  if (mode === 'siswa') return { t: mp, s: [r.gn, r.k !== me().kelas_id ? kelasNm(r.k) : '', r.r].filter(Boolean).join(' · ') };
+  return { t: mp, s: [r.gn, r.r].filter(Boolean).join(' · ') };
+}
+/** Buka presensi pertemuan langsung dari jadwal (guru). */
+function absenDariJadwal(pid) { S.c.absF = Object.assign(S.c.absF || {}, { jenis: 'PERTEMUAN', pid, tgl: D.ymd(now()) }); go('g-absensi'); }
+
+/** Kartu "Jadwal Hari Ini" untuk beranda siswa & dashboard guru. */
+function jadwalStrip(mode) {
+  const jd = JD(), cfg = jd.cfg, rows = mode === 'ajar' ? jd.rows.filter((r) => r.g === me().user_id) : jd.rows;
+  if (!rows.length) return mode === 'siswa' ? '' : '';
+  const act = jdHariAktif(cfg, rows), blocks = jdDay(rows, cfg, act.h, { istirahat: false, kosong: false });
+  const isToday = act.today, kini = isToday ? blocks.find((b) => jdStatus(b, act.h) === 'kini') : null;
+  const next = isToday ? blocks.find((b) => jdStatus(b, act.h) === 'nanti') : blocks[0];
+  const card = (b) => {
+    const st = jdStatus(b, act.h, isToday), r = b.rows[0], tx = r ? jdText(r, mode) : { t: '—', s: '' };
+    const lbl = st === 'kini' ? pill('Sekarang', 'ok', 'activity') : b === next ? pill('Berikutnya', 'info') : '';
+    return `<div class="jd-item ${st === 'kini' ? 'kini' : st === 'lalu' ? 'lalu' : ''}" ${r && r.p && mode === 'siswa' ? `onclick="go('s-mapel-d',{mapel_id:'${r.m}'})" role="button"` : ''}>
+      <div class="flex items-c g6 jc-b"><span class="mono xs bold">${jamLbl(b)}</span>${lbl}</div>
+      <div class="bold mt8 truncate">${esc(tx.t)}</div><div class="xs muted truncate mt4">${esc(tx.s || (b.ke.length > 1 ? 'Jam ' + b.ke[0] + '–' + b.ke[b.ke.length - 1] : 'Jam ke-' + b.ke[0]))}</div>
+      ${b.rows.length > 1 ? `<div class="xs muted mt4">+ ${b.rows.length - 1} lainnya</div>` : ''}
+      ${mode === 'ajar' && r && r.p ? `<button class="btn btn-sm btn-secondary mt8" onclick="event.stopPropagation();absenDariJadwal('${r.p}')">${I('user-plus', 'ic-sm')}Presensi</button>` : ''}</div>`;
+  };
+  const head = mode === 'ajar' ? (isToday ? 'Mengajar Hari Ini' : 'Jadwal Mengajar ' + act.label) : (isToday ? 'Jadwal Hari Ini' : 'Jadwal ' + act.label);
+  const sub = kini ? 'Sekarang: ' + jdText(kini.rows[0], mode).t : next ? (isToday ? 'Berikutnya ' : 'Mulai ') + next.mulai.replace(':', '.') + ' · ' + jdText(next.rows[0], mode).t : 'Pelajaran hari ini sudah selesai';
+  if (mode === 'siswa') return `<div class="sect-title"><h2>${head}</h2><a class="ml-a" href="javascript:void(0)" onclick="go('jadwal')">Seminggu ${I('chev-r', 'ic-sm')}</a></div>
+    <p class="small tx2" style="margin:-4px 0 10px">${HARI_N[act.h]} · ${esc(sub)}</p><div class="hscroll">${blocks.map(card).join('')}</div>`;
+  return `<div class="card mt16"><div class="card-hd"><div><h3>${head}</h3><p class="small muted">${HARI_N[act.h]} · ${esc(sub)}</p></div><a href="javascript:void(0)" class="small bold" onclick="go('jadwal')">Seminggu ${I('chev-r', 'ic-sm')}</a></div>
+    <div class="card-bd"><div class="hscroll">${blocks.map(card).join('')}</div></div></div>`;
+}
+
+/** Grid jadwal seminggu (desktop) atau per hari (HP). cellFn opsional untuk mode edit admin. */
+function jdGrid(rows, cfg, mode, opt) {
+  opt = opt || {};
+  const days = (cfg.hari || []).slice().sort(), desk = window.innerWidth >= 900;
+  const st = S.c.jdDay || (S.c.jdDay = {}), key = opt.key || 'v';
+  if (!st[key] || days.indexOf(st[key]) < 0) st[key] = days.indexOf(hariIni()) >= 0 ? hariIni() : days[0];
+  const show = desk ? days : [st[key]];
+  const col = (h) => {
+    const blocks = opt.edit ? jdSlots(cfg, h).map((s) => s.ke ? { mulai: s.mulai, selesai: s.selesai, ke: [s.ke], rows: rows.filter((r) => r.h === h && r.j === s.ke) } : { mulai: s.mulai, selesai: s.selesai, label: s.label || 'Istirahat' }) : jdDay(rows, cfg, h);
+    return `<div class="jd-col">${desk ? `<div class="jd-head ${h === hariIni() ? 'today' : ''}">${HARI_N[h]}</div>` : ''}${blocks.map((b) => {
+      if (!b.ke) return `<div class="jd-brk"><span>${esc(b.label)}</span><span class="mono">${jamLbl(b)}</span></div>`;
+      const stt = opt.edit ? '' : jdStatus(b, h);
+      const inner = b.rows.length ? b.rows.map((r) => { const tx = jdText(r, mode); return `<div class="jd-les ${r.p ? '' : 'keg'} ${opt.bentrok && opt.bentrok(r) ? 'bentrok' : ''}">${r.p ? `<span class="dot" style="background:${mapelColor(r.m)}"></span>` : ''}<div style="min-width:0"><div class="bold small truncate">${esc(tx.t)}</div>${tx.s ? `<div class="xs muted truncate">${esc(tx.s)}</div>` : ''}${opt.bentrok && opt.bentrok(r) ? `<div class="xs ink-err bold">${I('alert', 'ic-sm')} ${esc(opt.bentrok(r))}</div>` : ''}</div></div>`; }).join('')
+        : `<div class="xs muted">${opt.edit ? I('plus', 'ic-sm') + ' Isi' : '—'}</div>`;
+      const click = opt.edit ? `onclick="jdPick(${h},'${b.ke[0]}')"` : '';
+      return `<div class="jd-slot ${stt} ${opt.edit ? 'edit' : ''} ${b.rows.length ? '' : 'kosong'}" ${click}><div class="jd-time"><span class="mono">${b.mulai.replace(':', '.')}</span><span class="xs muted">${b.ke.length > 1 ? 'Jam ' + b.ke[0] + '–' + b.ke[b.ke.length - 1] : 'Jam ' + b.ke[0]}</span></div><div class="jd-body">${inner}</div>${stt === 'kini' ? '<span class="jd-now">Sekarang</span>' : ''}</div>`;
+    }).join('')}</div>`;
+  };
+  return `${desk ? '' : `<div class="seg mb12" style="display:flex;overflow-x:auto">${days.map((h) => `<button class="${st[key] === h ? 'on' : ''}" style="flex:1" onclick="S.c.jdDay['${key}']=${h};rerender()">${HARI_N[h].slice(0, 3)}${h === hariIni() ? ' •' : ''}</button>`).join('')}</div>`}
+    <div class="jd-wrap"><div class="jd-grid" style="grid-template-columns:repeat(${show.length},minmax(${desk ? 150 : 0}px,1fr))">${show.map(col).join('')}</div></div>`;
+}
+const MAPEL_COLORS = ['#2563EB', '#16A34A', '#D97706', '#7C3AED', '#DB2777', '#0891B2', '#DC2626', '#65A30D', '#9333EA', '#0D9488'];
+function mapelColor(id) { let h = 0; String(id || '').split('').forEach((c) => { h = (h * 31 + c.charCodeAt(0)) | 0; }); return MAPEL_COLORS[Math.abs(h) % MAPEL_COLORS.length]; }
+
+// ── Halaman Jadwal untuk siswa & guru ──
+route('jadwal', {
+  title: 'Jadwal Pelajaran', roles: ['SISWA', 'GURU'],
+  render() {
+    const jd = JD(), u = me(), isS = hasRole('SISWA');
+    const V = S.c.jdV || (S.c.jdV = { mode: 'ajar', kelas: (u.waliKelas || [])[0] || '' });
+    let rows = jd.rows, mode = 'siswa', sub = '';
+    if (isS) sub = 'Kelas ' + kelasNm(u.kelas_id) + ((u.kelas_x || []).length ? ' · ' + u.kelas_x.map(kelasNm).join(', ') : '');
+    else if (V.mode === 'wali' && (u.waliKelas || []).length) { rows = jd.rows.filter((r) => r.k === V.kelas); mode = 'kelas'; sub = 'Kelas ' + kelasNm(V.kelas); }
+    else { rows = jd.rows.filter((r) => r.g === u.user_id); mode = 'ajar'; sub = plural(rows.length, 'jam pelajaran') + ' per minggu'; }
+    const tools = !isS && (u.waliKelas || []).length ? `<div class="seg">${[['ajar', 'Jadwal Mengajar']].concat(u.waliKelas.map((k) => ['wali:' + k, kelasNm(k)])).map((x) => { const on = x[0] === 'ajar' ? V.mode === 'ajar' : V.mode === 'wali' && 'wali:' + V.kelas === x[0]; return `<button class="${on ? 'on' : ''}" onclick="${x[0] === 'ajar' ? "S.c.jdV.mode='ajar'" : `S.c.jdV.mode='wali';S.c.jdV.kelas='${x[0].slice(5)}'`};rerender()">${esc(x[1])}</button>`; }).join('')}</div>` : '';
+    return `<div class="page"><div class="page-hd"><div><h1>Jadwal Pelajaran</h1><p class="sub">${esc(sub)}${B().ta ? ' · Semester ' + esc(B().ta.semester) + ' ' + esc(B().ta.nama) : ''}</p></div>${tools}</div>
+      ${rows.length ? jdGrid(rows, jd.cfg, mode, { key: 'v' + mode }) : `<div class="card">${emptyState('clock', 'Jadwal belum tersedia', isS ? 'Jadwal pelajaran kelasmu belum diatur oleh admin sekolah.' : 'Admin sekolah belum mengisi jadwal untuk Anda. Jadwal diatur di menu Jadwal Pelajaran oleh Admin.')}</div>`}</div>`;
+  }
+});
+
+// ── Editor jadwal (Admin) ──
+route('a-jadwal', {
+  title: 'Jadwal Pelajaran', roles: ['ADMIN'],
+  render() {
+    const d = need('jdl', 'jadwal.list', {}, 60000), ent = S.c.jdl;
+    if (!d) return ent && ent.err ? `<div class="page">${emptyState('alert', 'Gagal memuat jadwal', esc(ent.err.message), `<button class="btn btn-secondary" onclick="drop('jdl');rerender()">${I('refresh')}Coba lagi</button>`)}</div>` : skelPage();
+    const kelas = (B().kelas || []).slice().sort((a, b) => (isKhusus(a) - isKhusus(b)) || String(a.nama_kelas).localeCompare(String(b.nama_kelas), 'id', { numeric: true }));
+    const E = S.c.jdE || (S.c.jdE = { view: 'kelas', kelas: (kelas[0] || {}).kelas_id, guru: '' });
+    if (!kelas.some((k) => k.kelas_id === E.kelas)) E.kelas = (kelas[0] || {}).kelas_id;
+    const cnt = {}; d.rows.forEach((r) => { cnt[r.k] = (cnt[r.k] || 0) + 1; });
+    const slotMap = {}; d.rows.forEach((r) => { if (!r.g) return; const k = r.g + '|' + r.h + '|' + r.j; (slotMap[k] = slotMap[k] || []).push(r.k); });
+    const bentrok = (r) => { const ks = (slotMap[r.g + '|' + r.h + '|' + r.j] || []).filter((x) => x !== r.k); return ks.length ? 'Bentrok: ' + ks.map(kelasShort).join(', ') : ''; };
+    const nB = Object.keys(slotMap).filter((k) => new Set(slotMap[k]).size > 1).length;
+    const st = S.c.jdSave || '';
+    const status = st === 'saving' ? `<span class="small muted flex items-c g6">${I('refresh', 'ic-sm')}Menyimpan…</span>` : st === 'err' ? `<span class="small ink-err flex items-c g6">${I('alert', 'ic-sm')}Gagal menyimpan <button class="btn btn-sm btn-ghost" onclick="jdFlush()">Coba lagi</button></span>` : st === 'ok' ? `<span class="small ink-ok flex items-c g6">${I('check-c', 'ic-sm')}Tersimpan</span>` : '';
+    const gurus = (B().gurus || []).slice().sort(by('nama'));
+    let body;
+    if (E.view === 'guru') {
+      if (!E.guru) E.guru = (gurus[0] || {}).user_id || '';
+      const rows = d.rows.filter((r) => r.g === E.guru);
+      body = `<div class="card card-p"><div class="flex g12 items-e wrap"><div class="field" style="min-width:240px"><label class="label">Guru</label><select class="select" onchange="S.c.jdE.guru=this.value;rerender()">${gurus.map((g) => `<option value="${g.user_id}" ${g.user_id === E.guru ? 'selected' : ''}>${esc(g.nama)} (${d.rows.filter((r) => r.g === g.user_id).length} jam)</option>`).join('')}</select></div><p class="small muted">${plural(rows.length, 'jam')} per minggu. Ubah jadwal melalui tampilan per kelas.</p></div></div>
+        <div class="mt16">${rows.length ? jdGrid(rows, d.cfg, 'guru', { key: 'g', bentrok }) : `<div class="card">${emptyState('clock', 'Belum ada jam mengajar', 'Guru ini belum dijadwalkan di kelas mana pun.')}</div>`}</div>`;
+    } else {
+      const k = kelasBy(E.kelas), rows = d.rows.filter((r) => r.k === E.kelas);
+      const pens = G().penugasan.filter((p) => p.kelas_id === E.kelas);
+      body = `<div class="chips scroll">${kelas.map((x) => `<button class="chip ${x.kelas_id === E.kelas ? 'on' : ''}" onclick="S.c.jdE.kelas='${x.kelas_id}';rerender()">${esc(x.nama_kelas)}${isKhusus(x) ? ' ★' : ''}<span class="cnt">${cnt[x.kelas_id] || 0}</span></button>`).join('')}</div>
+        <div class="card card-p mt12 flex items-c g12 wrap"><div class="f1" style="min-width:200px"><div class="bold">${esc(k.nama_kelas)} ${kelasPill(k)}</div><div class="small muted">${plural(rows.length, 'jam terisi')} · ${plural(pens.length, 'penugasan mengajar')} · klik kotak jam untuk mengisi</div></div>${status}</div>
+        ${!pens.length ? `<div class="banner banner-warn mt12">${I('alert')}<div class="f1 small">Kelas ini belum punya penugasan mengajar, jadi mapel belum bisa dipilih. Tambahkan di Data Akademik → Penugasan Mengajar, atau gunakan Import Excel (penugasan dibuat otomatis).</div><button class="btn btn-sm btn-secondary" onclick="go('a-akademik',{tab:'penugasan'})">Penugasan</button></div>` : ''}
+        <div class="mt12">${jdGrid(rows, d.cfg, 'kelas', { key: 'e', edit: true, bentrok })}</div>`;
+    }
+    return `<div class="page"><div class="page-hd"><div><h1>Jadwal Pelajaran</h1><p class="sub">Hanya admin yang dapat mengubah. Guru dan siswa melihat jadwalnya di dashboard masing-masing.</p></div>
+        <div class="flex g8 wrap"><button class="btn btn-secondary" onclick="openJamEditor()">${I('clock')}Jam Pelajaran</button><button class="btn btn-secondary" onclick="openJadwalImport()">${I('upload')}Import Excel</button><button class="btn btn-ghost" onclick="exportJadwal()">${I('download')}Ekspor</button></div></div>
+      ${nB ? `<div class="banner banner-err mb16">${I('alert-c')}<div class="f1 small"><b>${nB} jadwal bentrok:</b> ada guru yang dijadwalkan di dua kelas pada jam yang sama. Kotak yang bentrok diberi tanda merah.</div></div>` : ''}
+      <div class="seg mb12">${[['kelas', 'Per Kelas'], ['guru', 'Per Guru']].map((x) => `<button class="${E.view === x[0] ? 'on' : ''}" onclick="S.c.jdE.view='${x[0]}';rerender()">${x[1]}</button>`).join('')}</div>
+      ${body}</div>`;
+  }
+});
+/** Pilih isi satu kotak jam (penugasan / kegiatan / kosongkan). */
+function jdPick(h, ke) {
+  const d = S.c.jdl && S.c.jdl.d; if (!d) return;
+  const kid = S.c.jdE.kelas, slots = jdSlots(d.cfg, h), s = slots.find((x) => x.ke === ke), cur = d.rows.find((r) => r.k === kid && r.h === h && r.j === ke);
+  const nextS = slots.slice(slots.indexOf(s) + 1).find((x) => x.ke);
+  const pens = G().penugasan.filter((p) => p.kelas_id === kid).sort(by((p) => mapelNm(p.mapel_id)));
+  const busy = (gid) => d.rows.filter((r) => r.g === gid && r.h === h && r.j === ke && r.k !== kid).map((r) => kelasShort(r.k));
+  sheet({ title: `${HARI_N[h]} · Jam ke-${esc(ke)} · ${esc(kelasNm(kid))}`, icon: 'clock', body: `<p class="small muted">${jamLbl(s)}</p>
+    <div class="col g8 mt12">${pens.map((p) => { const b = busy(p.guru_id); return `<button class="row-item click card" style="padding:10px 12px;text-align:left;${cur && cur.p === p.penugasan_id ? 'border-color:var(--p600);background:var(--p50)' : ''}" data-pid="${p.penugasan_id}">${mapelIcon(p.mapel_id, 'sm')}<div class="f1" style="min-width:0"><div class="bold small">${esc(mapelNm(p.mapel_id))}</div><div class="xs muted truncate">${esc(p.guru || '')}</div>${b.length ? `<div class="xs ink-err bold">${I('alert', 'ic-sm')} Sudah mengajar ${esc(b.join(', '))} di jam ini</div>` : ''}</div>${cur && cur.p === p.penugasan_id ? I('check-c', 'ink-p') : ''}</button>`; }).join('') || '<p class="small muted">Belum ada penugasan mengajar di kelas ini.</p>'}</div>
+    <div class="divider"></div>
+    <div class="form-grid c2"><div class="field"><label class="label">Kegiatan lain (bukan pelajaran)</label><input class="input" id="jdLbl" maxlength="60" placeholder="mis. Upacara, Literasi, Pramuka" value="${esc(cur && !cur.p ? cur.l : '')}"></div>
+      <div class="field"><label class="label">Ruang (opsional)</label><input class="input" id="jdRu" maxlength="40" placeholder="mis. Lab IPA" value="${esc(cur ? cur.r : '')}"></div></div>
+    ${nextS ? `<label class="flex items-c g8 mt12 small" style="cursor:pointer"><input type="checkbox" id="jdNext" style="width:18px;height:18px;accent-color:var(--p600)"> Isi juga jam ke-${esc(nextS.ke)} (${jamLbl(nextS)})</label>` : ''}`,
+    foot: `${cur ? `<button class="btn btn-danger-o" id="jdClr">${I('trash')}Kosongkan</button>` : ''}<button class="btn btn-primary" id="jdKeg">${I('check')}Simpan Kegiatan</button>`,
+    mount: (el, close) => {
+      const apply = (p, label) => {
+        const ru = $('#jdRu', el).value.trim(), kes = [ke].concat(nextS && $('#jdNext', el) && $('#jdNext', el).checked ? [nextS.ke] : []);
+        kes.forEach((j) => {
+          d.rows = d.rows.filter((r) => !(r.k === kid && r.h === h && r.j === j));
+          if (p || label) { const pn = p ? G().penugasan.find((x) => x.penugasan_id === p) : null; d.rows.push({ id: 'tmp', k: kid, h, j, p: p || '', m: pn ? pn.mapel_id : '', g: pn ? pn.guru_id : '', gn: pn ? pn.guru || '' : '', l: p ? '' : label, r: ru }); }
+        });
+        close(); JDV[kid] = (JDV[kid] || 0) + 1; rerender(); jdQueue(kid);
+      };
+      $$('[data-pid]', el).forEach((b) => { b.onclick = () => apply(b.dataset.pid, ''); });
+      $('#jdKeg', el).onclick = () => { const v = $('#jdLbl', el).value.trim(); if (!v) { toast('Pilih mapel di atas, atau isi nama kegiatan.', 'warn'); return; } apply('', v); };
+      if ($('#jdClr', el)) $('#jdClr', el).onclick = () => apply('', '');
+    } });
+}
+/** Simpan otomatis per kelas (ditunda sebentar agar beberapa perubahan cepat jadi satu permintaan). */
+const JDQ = {}, JDV = {};   // JDV: versi edit lokal per kelas (jawaban server lama tidak menimpa edit yang lebih baru)
+let jdTimer = null;
+function jdQueue(kid) { JDQ[kid] = 1; S.c.jdSave = 'saving'; clearTimeout(jdTimer); jdTimer = setTimeout(jdFlush, 700); }
+let jdBusy = false;
+/** Kirim perubahan yang antre. Hanya satu pengiriman berjalan sekaligus agar urutan simpan di server selalu benar. */
+function jdFlush() {
+  const d = S.c.jdl && S.c.jdl.d; if (!d) return;
+  if (jdBusy) { clearTimeout(jdTimer); jdTimer = setTimeout(jdFlush, 400); return; }
+  const ks = Object.keys(JDQ); ks.forEach((k) => delete JDQ[k]);
+  if (!ks.length) { if (S.c.jdSave === 'err') { S.c.jdSave = ''; rerender(); } return; }
+  jdBusy = true; S.c.jdSave = 'saving'; if (S.route === 'a-jadwal') rerender();
+  Promise.all(ks.map((kid) => {
+    const v = JDV[kid] || 0, cells = d.rows.filter((r) => r.k === kid).map((r) => ({ hari: r.h, jam_ke: r.j, penugasan_id: r.p, label: r.l, ruang: r.r }));
+    return call('jadwal.save', { kelas_id: kid, cells }, { silent: true }).then((res) => {
+      if ((JDV[kid] || 0) === v) d.rows = d.rows.filter((r) => r.k !== kid).concat(res.rows);   // edit yang lebih baru tetap dipertahankan
+      if (res.bentrok.length) toast(`Jadwal ${kelasNm(kid)} tersimpan, tetapi ada ${res.bentrok.length} bentrok guru (ditandai merah).`, 'warn', 6000);
+    });
+  })).then(() => {
+    jdBusy = false;
+    if (Object.keys(JDQ).length) { jdFlush(); return; }
+    S.c.jdSave = 'ok'; S.c.jdl.t = Date.now(); syncJadwalSaya(d); if (S.route === 'a-jadwal') rerender();
+  }).catch((e) => { jdBusy = false; ks.forEach((k) => { JDQ[k] = 1; }); S.c.jdSave = 'err'; failToast(e); if (S.route === 'a-jadwal') rerender(); });
+}
+/** Admin yang juga guru: perbarui jadwal mengajarnya sendiri di data awal tanpa memuat ulang. */
+function syncJadwalSaya(d) { if (!B().jadwal || !hasRole('GURU')) return; const u = me(); B().jadwal.cfg = d.cfg; B().jadwal.rows = d.rows.filter((r) => r.g === u.user_id || (u.waliKelas || []).indexOf(r.k) >= 0); saveSnap(); }
+
+// ── Pengaturan jam pelajaran ──
+function openJamEditor() {
+  const d = S.c.jdl && S.c.jdl.d; if (!d) return;
+  const W = JSON.parse(JSON.stringify(d.cfg)); W.khusus = W.khusus || {};
+  const addMin = (hm, m) => { const [h, mm] = hm.split(':').map(Number), t = h * 60 + mm + m; return pad(Math.floor(t / 60) % 24) + ':' + pad(t % 60); };
+  const tbl = (key) => {
+    const list = key === 'def' ? W.def : W.khusus[key];
+    return `<div class="tbl-wrap"><table class="tbl compact"><thead><tr><th style="width:80px">Jam ke</th><th>Mulai</th><th>Selesai</th><th>Keterangan</th><th></th></tr></thead><tbody>${list.map((s, i) => `<tr>
+      <td><input class="input input-sm" data-k="${key}" data-i="${i}" data-f="ke" value="${esc(s.ke)}" placeholder="—" style="width:64px"></td>
+      <td><input class="input input-sm" type="time" data-k="${key}" data-i="${i}" data-f="mulai" value="${s.mulai}"></td>
+      <td><input class="input input-sm" type="time" data-k="${key}" data-i="${i}" data-f="selesai" value="${s.selesai}"></td>
+      <td><input class="input input-sm" data-k="${key}" data-i="${i}" data-f="label" value="${esc(s.label || '')}" placeholder="${s.ke ? '' : 'Istirahat'}" ${s.ke ? 'disabled' : ''}></td>
+      <td><button class="icon-btn ink-err" data-del="${key}:${i}" title="Hapus">${I('x')}</button></td></tr>`).join('')}</tbody></table></div>
+      <div class="flex g8 mt8 wrap"><button class="btn btn-sm btn-secondary" data-add="${key}:jam">${I('plus', 'ic-sm')}Jam pelajaran</button><button class="btn btn-sm btn-ghost" data-add="${key}:ist">${I('plus', 'ic-sm')}Istirahat / kegiatan</button></div>`;
+  };
+  const s = sheet({ title: 'Jam Pelajaran', icon: 'clock', size: 'wide', body: '<div id="jamBox"></div>', foot: `<button class="btn btn-primary" id="jamSave">${I('check')}Simpan Jam Pelajaran</button>`,
+    mount: (el) => {
+      const draw = () => {
+        $('#jamBox', el).innerHTML = `<div class="field"><label class="label">Hari sekolah</label><div class="chips">${[1, 2, 3, 4, 5, 6, 7].map((h) => `<button type="button" class="chip ${W.hari.indexOf(h) >= 0 ? 'sel-o' : ''}" data-h="${h}">${W.hari.indexOf(h) >= 0 ? I('check', 'ic-sm') : ''}${HARI_N[h]}</button>`).join('')}</div></div>
+          <h3 class="mt16">Jam pelajaran umum</h3><p class="small muted mt4">Berlaku untuk semua hari sekolah, kecuali hari yang diberi jam khusus. Baris tanpa "jam ke" adalah istirahat atau kegiatan.</p><div class="mt8">${tbl('def')}</div>
+          <h3 class="mt24">Hari dengan jam berbeda</h3><p class="small muted mt4">Misalnya Senin ada upacara atau Jumat lebih pendek.</p>
+          ${W.hari.map((h) => `<div class="card card-p mt12"><label class="flex items-c g8" style="cursor:pointer"><input type="checkbox" data-kh="${h}" ${W.khusus[h] ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--p600)"><b>${HARI_N[h]}</b> memakai jam khusus</label>${W.khusus[h] ? `<div class="mt12">${tbl(String(h))}</div>` : ''}</div>`).join('')}`;
+        $$('[data-h]', el).forEach((b) => { b.onclick = () => { const h = +b.dataset.h, i = W.hari.indexOf(h); if (i >= 0) W.hari.splice(i, 1); else W.hari.push(h); W.hari.sort(); draw(); }; });
+        $$('[data-kh]', el).forEach((c) => { c.onchange = () => { const h = c.dataset.kh; if (c.checked) W.khusus[h] = JSON.parse(JSON.stringify(W.def)); else delete W.khusus[h]; draw(); }; });
+        $$('[data-f]', el).forEach((inp) => { inp.oninput = () => { const list = inp.dataset.k === 'def' ? W.def : W.khusus[inp.dataset.k], it = list[+inp.dataset.i]; it[inp.dataset.f] = inp.value.trim(); if (inp.dataset.f === 'ke') { const lb = inp.closest('tr').querySelector('[data-f="label"]'); lb.disabled = !!it.ke; } }; });
+        $$('[data-del]', el).forEach((b) => { b.onclick = () => { const [k, i] = b.dataset.del.split(':'); (k === 'def' ? W.def : W.khusus[k]).splice(+i, 1); draw(); }; });
+        $$('[data-add]', el).forEach((b) => { b.onclick = () => {
+          const [k, t] = b.dataset.add.split(':'), list = k === 'def' ? W.def : W.khusus[k], last = list[list.length - 1];
+          const mulai = last ? last.selesai : '07:00', nKe = list.filter((x) => x.ke).length + 1;
+          list.push(t === 'jam' ? { ke: String(nKe), mulai, selesai: addMin(mulai, 45), label: '' } : { ke: '', mulai, selesai: addMin(mulai, 15), label: 'Istirahat' }); draw();
+        }; });
+      };
+      draw();
+      $('#jamSave', el).onclick = () => {
+        const btn = $('#jamSave', el); btnBusy(btn, true, 'Menyimpan…');
+        call('jadwal.jam', { cfg: W }).then((r) => {
+          d.cfg = r.cfg; if (B().jadwal) B().jadwal.cfg = r.cfg; saveSnap(); s.close(); rerender();
+          toast(r.yatim ? `Jam pelajaran disimpan. ${r.yatim} jadwal berada di luar jam baru dan tidak ditampilkan — periksa kembali.` : 'Jam pelajaran disimpan.', r.yatim ? 'warn' : 'ok', 7000);
+        }).catch((e) => { btnBusy(btn, false); failToast(e); });
+      };
+    } });
+}
+
+// ── Import & ekspor jadwal (Excel) ──
+const JADWAL_COLS = ['kelas', 'hari', 'jam_ke', 'mapel', 'guru', 'ruang', 'kegiatan'];
+function jadwalTemplate() {
+  const d = S.c.jdl && S.c.jdl.d, cfg = d ? d.cfg : JD().cfg, kelas = (B().kelas || []).slice().sort(by('nama_kelas'));
+  const k0 = kelas.find((k) => G().penugasan.some((p) => p.kelas_id === k.kelas_id)) || kelas[0] || { nama_kelas: 'XI-1', kelas_id: '' };
+  const pens = G().penugasan.filter((p) => p.kelas_id === k0.kelas_id).slice(0, 3);
+  const ex = [JADWAL_COLS, [k0.nama_kelas, 'Senin', '1', '', '', '', 'Upacara']];
+  pens.forEach((p, i) => ex.push([k0.nama_kelas, 'Senin', i === 0 ? '2-3' : String(i + 3), mapelNm(p.mapel_id), p.guru || '', i === 0 ? 'Lab IPA' : '', '']));
+  if (!pens.length) ex.push([k0.nama_kelas, 'Senin', '2-3', 'Matematika', 'Nama Guru', '', '']);
+  const jam = [['hari', 'jam ke', 'mulai', 'selesai', 'keterangan']];
+  (cfg.hari || []).forEach((h) => jdSlots(cfg, h).forEach((s) => jam.push([HARI_N[h], s.ke, s.mulai, s.selesai, s.label || ''])));
+  exportXlsx('template_jadwal_pelajaran', [
+    { name: 'Jadwal', rows: ex },
+    { name: 'Petunjuk', rows: [['Petunjuk pengisian jadwal pelajaran'], ['Satu baris = satu pelajaran di satu kelas. Kolom: kelas, hari, jam_ke, mapel, guru, ruang, kegiatan.'], ['kelas: nama kelas seperti di Data Akademik (singkatan XI-2 atau 11-2 boleh bila hanya cocok satu kelas). Kelas eskul/pengayaan juga bisa.'], ['hari: Senin, Selasa, Rabu, Kamis, Jumat, Sabtu.'], ['jam_ke: satu jam (3), rentang (1-2), atau daftar (1,3). Harus ada di lembar "Jam Pelajaran".'], ['mapel: nama atau kode mapel. guru: nama, NIP, atau username guru (wajib bila mapel di kelas itu diajar lebih dari satu guru).'], ['Bila guru dan mapel belum punya penugasan di kelas tersebut, penugasan dibuat otomatis saat import.'], ['kegiatan: isi untuk acara non-pelajaran (Upacara, Literasi) dan kosongkan kolom mapel.'], ['Mode "Ganti" menghapus jadwal lama kelas-kelas yang ada di berkas lalu memakai isi berkas. Mode "Tambah" hanya mengganti jam yang tertulis di berkas.']] },
+    { name: 'Jam Pelajaran', rows: jam },
+    { name: 'Daftar Kelas', rows: [['nama_kelas', 'jenis']].concat(kelas.map((k) => [k.nama_kelas, JENIS_KELAS[k.jenis || 'REGULER']])) },
+    { name: 'Daftar Mapel', rows: [['nama_mapel', 'kode']].concat((B().mapel || []).map((m) => [m.nama_mapel, m.kode || ''])) },
+    { name: 'Daftar Guru', rows: [['nama', 'nip']].concat((B().gurus || []).map((g) => [g.nama, g.nis_nip || ''])) },
+    { name: 'Penugasan', rows: [['kelas', 'mapel', 'guru']].concat(G().penugasan.map((p) => [kelasNm(p.kelas_id), mapelNm(p.mapel_id), p.guru || '']).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]))) }]);
+}
+function exportJadwal() {
+  const d = S.c.jdl && S.c.jdl.d; if (!d) return;
+  const rows = d.rows.slice().sort((a, b) => kelasNm(a.k).localeCompare(kelasNm(b.k)) || a.h - b.h || String(a.j).localeCompare(String(b.j), 'id', { numeric: true }));
+  exportXlsx('jadwal_pelajaran_' + D.ymd(now()), [{ name: 'Jadwal', rows: [JADWAL_COLS].concat(rows.map((r) => [kelasNm(r.k), HARI_N[r.h], r.j, r.p ? mapelNm(r.m) : '', r.gn || '', r.r || '', r.p ? '' : r.l])) }]);
+}
+function openJadwalImport() {
+  const W = { rows: null, res: null, file: '', mode: 'GANTI' };
+  const s = sheet({ title: 'Import Jadwal dari Excel', icon: 'upload', size: 'wide', body: '<div id="jiBody"></div>', foot: `<button class="btn btn-secondary" id="jiTpl">${I('download')}Unduh Template</button><button class="btn btn-primary" id="jiGo" disabled>${I('cloud-ok')}Import</button>`,
+    mount: (el) => {
+      const draw = () => {
+        const r = W.res;
+        $('#jiBody', el).innerHTML = `<p class="small tx2">Kolom: <span class="mono xs">${JADWAL_COLS.join(', ')}</span>. Unduh template: isinya contoh dari data sekolah Anda serta daftar kelas, mapel, guru, dan jam pelajaran.</p>
+          <label class="upload mt12">${I('file-text', 'ic-lg')}<div class="bold mt8">${W.file ? esc(W.file) : 'Pilih berkas .xlsx atau .csv'}</div><div class="small muted">Maksimal 3.000 baris</div><input type="file" hidden accept=".xlsx,.xls,.csv" id="jiFile"></label>
+          <div class="field mt16"><label class="label">Cara menyimpan</label><div class="seg">${[['GANTI', 'Ganti jadwal kelas di berkas'], ['TAMBAH', 'Hanya jam yang tertulis']].map((x) => `<button class="${W.mode === x[0] ? 'on' : ''}" data-m="${x[0]}">${x[1]}</button>`).join('')}</div></div>
+          ${r ? `<div class="flex g8 mt16 wrap">${pill(r.jam + ' jam siap', 'ok', 'check')}${pill(r.kelas.length + ' kelas', 'info')}${r.penugasanBaru ? pill(r.penugasanBaru + ' penugasan baru', 'vio', 'plus') : ''}${r.errors.length ? pill(r.errors.length + ' baris bermasalah (dilewati)', 'err', 'alert') : ''}</div>
+            <div class="tbl-wrap mt12" style="max-height:44vh"><table class="tbl compact"><thead><tr><th>Baris</th><th>Kelas</th><th>Hari</th><th>Jam</th><th>Mapel / kegiatan</th><th>Guru</th><th>Status</th></tr></thead><tbody>${r.all.map((x) => x.err ? `<tr class="row-err"><td class="mono">#${x.i + 2}</td><td colspan="5" class="small">${esc([W.rows[x.i].kelas, W.rows[x.i].hari, W.rows[x.i].jam_ke, W.rows[x.i].mapel || W.rows[x.i].kegiatan].filter(Boolean).join(' · '))}</td><td class="small ink-err">${esc(x.err)}</td></tr>`
+              : `<tr><td class="mono">#${x.i + 2}</td><td class="small">${esc(x.kelas)}</td><td class="small">${esc(x.hari)}</td><td class="mono small">${esc(x.jam_ke)}</td><td class="small">${esc(x.mapel || x.kegiatan)}${x.ruang ? ' · ' + esc(x.ruang) : ''}</td><td class="small">${esc(x.guru || '')}</td><td>${x.baru ? pill('Penugasan baru', 'vio') : pill('Valid', 'ok')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+        $$('[data-m]', el).forEach((b) => { b.onclick = () => { W.mode = b.dataset.m; draw(); }; });
+        $('#jiFile', el).onchange = (e) => {
+          const f = e.target.files[0]; if (!f) return; W.file = f.name;
+          readSheetFile(f).then((rows) => { W.rows = rowsToObjs(rows); if (!W.rows.length) throw new Error('Berkas kosong atau baris pertama bukan nama kolom.'); return call('jadwal.import', { rows: W.rows, dry: true }); })
+            .then((r2) => { W.res = Object.assign(r2, { all: r2.valid.concat(r2.errors.map((x) => ({ i: x.i, err: x.msg }))).sort(by('i')) }); $('#jiGo', el).disabled = !r2.valid.length; $('#jiGo', el).innerHTML = `${I('cloud-ok')}Import ${r2.jam} Jam`; draw(); })
+            .catch(failToast);
+        };
+      };
+      draw();
+      $('#jiTpl', el).onclick = jadwalTemplate;
+      $('#jiGo', el).onclick = () => {
+        const btn = $('#jiGo', el), okI = {}; W.res.valid.forEach((v) => { okI[v.i] = 1; }); btnBusy(btn, true, 'Menyimpan…');
+        call('jadwal.import', { rows: W.rows.filter((x, i) => okI[i]), mode: W.mode }).then((r) => {
+          s.close(); S.c.jdl = { t: Date.now(), d: r.list }; syncJadwalSaya(r.list);
+          if (r.penugasanBaru) refreshBoot(true).catch(() => {});
+          rerender(); toast(`${r.inserted} jam pelajaran diimpor untuk ${r.kelas} kelas${r.penugasanBaru ? ', ' + r.penugasanBaru + ' penugasan baru dibuat' : ''}.`, 'ok', 6000);
+          if (r.bentrok.length) toast(r.bentrok.length + ' jadwal bentrok guru ditemukan. Periksa kotak bertanda merah.', 'warn', 8000);
+        }).catch((e) => { btnBusy(btn, false); failToast(e); });
+      };
+    } });
+}
+
+// ════════════════════════════════════════════════════════
+// IMPORT SOAL DARI WORD (.docx) & EXCEL (.xlsx) LENGKAP DENGAN GAMBAR
+// Berkas dibaca langsung di perangkat (JSZip). Gambar diperkecil lalu diunggah ke Drive saat soal disimpan.
+// ════════════════════════════════════════════════════════
+let JSZIPP = null;
+function loadJSZip() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  if (JSZIPP) return JSZIPP;
+  JSZIPP = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'; s.onload = () => res(window.JSZip); s.onerror = () => { JSZIPP = null; rej(new Error('Pustaka pembaca berkas gagal dimuat. Periksa koneksi internet lalu coba lagi.')); }; document.head.appendChild(s); });
+  return JSZIPP;
+}
+const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const xmlOf = (t) => new DOMParser().parseFromString(t, 'application/xml');
+const kidsL = (el, n) => Array.from(el ? el.children : []).filter((c) => c.localName === n);
+const kidL = (el, n) => kidsL(el, n)[0] || null;
+function descL(el, n) { if (!el) return null; for (const c of el.children) { if (c.localName === n) return c; const x = descL(c, n); if (x) return x; } return null; }
+function allL(el, n, out) { out = out || []; if (!el) return out; for (const c of el.children) { if (c.localName === n) out.push(c); allL(c, n, out); } return out; }
+const attrL = (el, n) => { if (!el) return ''; for (const a of el.attributes) if (a.localName === n) return a.value; return ''; };
+function joinPath(base, target) {
+  if (target.charAt(0) === '/') return target.slice(1);
+  const parts = (base + target).split('/'), out = [];
+  parts.forEach((p) => { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); });
+  return out.join('/');
+}
+/** Peta relasi (rId → path di dalam zip) dari berkas .rels. */
+async function relsOf(zip, relPath, baseDir) {
+  const f = zip.file(relPath), m = {}; if (!f) return m;
+  kidsL(xmlOf(await f.async('string')).documentElement, 'Relationship').forEach((r) => { if (r.getAttribute('TargetMode') !== 'External') m[r.getAttribute('Id')] = joinPath(baseDir, r.getAttribute('Target')); });
+  return m;
+}
+const IMG_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+/** Ambil gambar dari zip sebagai Blob; format yang tidak bisa ditampilkan browser (EMF/WMF/TIFF) dilaporkan. */
+async function zipImage(zip, path) {
+  const ext = String(path.split('.').pop() || '').toLowerCase(), f = zip.file(path);
+  if (!f) return { err: 'Gambar tidak ditemukan di dalam berkas.' };
+  if (!IMG_MIME[ext]) return { err: 'Format gambar ' + ext.toUpperCase() + ' tidak didukung. Simpan ulang gambar sebagai PNG/JPG lalu tempel lagi.' };
+  return { blob: new Blob([await f.async('uint8array')], { type: IMG_MIME[ext] }), name: path.split('/').pop() };
+}
+const SUPC = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
+const SUBC = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎' };
+/** Pangkat/indeks Word → karakter Unicode (m/s², H₂O); bila tak terpetakan → ^(…) / _(…). */
+function supSub(t, va) {
+  if (!t || (va !== 'superscript' && va !== 'subscript')) return t || '';
+  const m = va === 'superscript' ? SUPC : SUBC, chars = t.split('');
+  return chars.every((c) => m[c]) ? chars.map((c) => m[c]).join('') : (va === 'superscript' ? '^' : '_') + (t.length > 1 ? '(' + t + ')' : t);
+}
+/** Teks persamaan Word (OMML) dalam bentuk sederhana: pecahan a/b, akar √, pangkat & indeks. */
+function mathText(el) {
+  if (!el) return '';
+  const n = el.localName;
+  if (n === 't') return el.textContent;
+  if (/Pr$/.test(n)) return '';
+  if (n === 'sSup') return mathText(kidL(el, 'e')) + supSub(mathText(kidL(el, 'sup')), 'superscript');
+  if (n === 'sSub') return mathText(kidL(el, 'e')) + supSub(mathText(kidL(el, 'sub')), 'subscript');
+  if (n === 'sSubSup') return mathText(kidL(el, 'e')) + supSub(mathText(kidL(el, 'sub')), 'subscript') + supSub(mathText(kidL(el, 'sup')), 'superscript');
+  if (n === 'f') { const a = mathText(kidL(el, 'num')), b = mathText(kidL(el, 'den')); return (a.length > 1 ? '(' + a + ')' : a) + '/' + (b.length > 1 ? '(' + b + ')' : b); }
+  if (n === 'rad') { const x = mathText(kidL(el, 'e')); return '√' + (x.length > 1 ? '(' + x + ')' : x); }
+  let s = ''; for (const c of el.children) s += mathText(c); return s;
+}
+/** Format penomoran otomatis Word: numId → {level: decimal|upperLetter|lowerLetter|bullet|…}. */
+async function docxNumFmt(zip) {
+  const f = zip.file('word/numbering.xml'), out = {}; if (!f) return out;
+  const x = xmlOf(await f.async('string')).documentElement, abs = {};
+  kidsL(x, 'abstractNum').forEach((a) => { const m = {}; kidsL(a, 'lvl').forEach((l) => { m[attrL(l, 'ilvl')] = attrL(kidL(l, 'numFmt'), 'val') || 'decimal'; }); abs[attrL(a, 'abstractNumId')] = m; });
+  kidsL(x, 'num').forEach((n) => { out[attrL(n, 'numId')] = abs[attrL(kidL(n, 'abstractNumId'), 'val')] || {}; });
+  return out;
+}
+function paraInfo(p, numFmt) {
+  let txt = ''; const imgs = [];
+  const pPr = kidL(p, 'pPr'), numPr = pPr && kidL(pPr, 'numPr');
+  let list = null;
+  if (numPr) { const nid = attrL(kidL(numPr, 'numId'), 'val'), lvl = +(attrL(kidL(numPr, 'ilvl'), 'val') || 0); if (nid && nid !== '0') list = { lvl, fmt: (numFmt[nid] || {})[lvl] || 'decimal' }; }
+  const walk = (el, va) => {
+    for (const c of el.children) {
+      const n = c.localName;
+      if (n === 'pPr' || n === 'rPr' || n === 'Fallback' || n === 'delText' || n === 'instrText' || n === 'del') continue;
+      if (n === 'r') { const rPr = kidL(c, 'rPr'), v = rPr && kidL(rPr, 'vertAlign'); walk(c, v ? attrL(v, 'val') : ''); continue; }
+      if (n === 't') { txt += supSub(c.textContent, va); continue; }
+      if (n === 'tab') { txt += ' '; continue; }
+      if (n === 'br' || n === 'cr') { txt += '\n'; continue; }
+      if (n === 'blip') { const id = c.getAttributeNS(R_NS, 'embed'); if (id) imgs.push(id); continue; }
+      if (n === 'imagedata') { const id = c.getAttributeNS(R_NS, 'id'); if (id) imgs.push(id); continue; }
+      if (n === 'oMath' || n === 'oMathPara') { txt += mathText(c); continue; }
+      walk(c, va);
+    }
+  };
+  walk(p, '');
+  return { text: txt.replace(/ /g, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(), imgs: imgs.filter((v, i, a) => a.indexOf(v) === i), list };
+}
+/** Paragraf dokumen sesuai urutan baca (termasuk isi tabel & content control). */
+function docxParas(body, numFmt) {
+  const out = [];
+  const walk = (el) => { for (const c of el.children) { const n = c.localName; if (n === 'p') out.push(paraInfo(c, numFmt)); else if (n === 'tbl' || n === 'tr' || n === 'tc' || n === 'sdt' || n === 'sdtContent' || n === 'customXml') walk(c); } };
+  walk(body);
+  return out;
+}
+const SKOR_DEF = { PG: 1, MCMA: 2, KATEGORI: 2, ESAI: 5 };
+function normTipe(t) {
+  const x = String(t || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (!x) return '';
+  if (/^(PG|PILIHANGANDA|PILGAN)$/.test(x)) return 'PG';
+  if (/MCMA|KOMPLEKS|GANDAKOMPLEKS|JAMAK/.test(x)) return 'MCMA';
+  if (/BENAR|SALAH|^BS$|KATEGORI|SETUJU/.test(x)) return 'KATEGORI';
+  if (/ESAI|ESSAY|URAIAN|ISIAN/.test(x)) return 'ESAI';
+  return x;
+}
+/**
+ * Ubah paragraf Word menjadi soal. Format: "1. teks", "A. pilihan", "KUNCI: B", "TIPE:", "SKOR:", "RUBRIK:",
+ * pernyataan benar–salah diawali "-". Penomoran & huruf otomatis Word juga dikenali.
+ */
+function soalFromParas(paras) {
+  const qs = [], warn = [], def = {};
+  const mk = paras.findIndex((p) => /^=+\s*MULAI\s+SOAL\s*=+$/i.test(p.text));
+  const list = mk >= 0 ? paras.slice(mk + 1) : paras;
+  const RX_Q = /^(\d{1,3})\s*[.)](?:\s+|$)([\s\S]*)$/, RX_O = /^([A-Ea-e])\s*[.)](?:\s+|$)([\s\S]*)$/;
+  const RX_M = /^(KUNCI JAWABAN|KUNCI|JAWABAN|SKOR|BOBOT|POIN|TIPE SOAL|TIPE|JENIS|RUBRIK|PEDOMAN|KATEGORI|LABEL|MODE SKOR|MODE|PEMBAHASAN)\s*[:=]\s*([\s\S]*)$/i;
+  const RX_B = /^[-•*–·▪●]\s*([\s\S]+)$/;
+  let q = null, last = '', auto = 0;
+  const start = (no, text) => { q = { no, soal: text ? [text] : [], opsi: {}, per: [], img: [], meta: {} }; qs.push(q); last = 'soal'; };
+  const nextLetter = () => 'ABCDE'.split('').find((L) => !q.opsi[L]);
+  list.forEach((p) => {
+    const t = p.text, L = p.list;
+    const m = t.match(RX_M);
+    if (m) {
+      const k = m[1].toUpperCase(), v = m[2].trim();
+      const key = /KUNCI|JAWABAN/.test(k) ? 'kunci' : /SKOR|BOBOT|POIN/.test(k) ? 'skor' : /TIPE|JENIS/.test(k) ? 'tipe' : /RUBRIK|PEDOMAN/.test(k) ? 'rubrik' : /KATEGORI|LABEL/.test(k) ? 'kategori' : /MODE/.test(k) ? 'mode' : 'bahas';
+      if (!q) { if (key === 'skor' || key === 'tipe' || key === 'mode') def[key] = v; return; }
+      q.meta[key] = v; last = 'meta:' + key;
+    } else if (RX_Q.test(t) && !(L && L.fmt !== 'decimal')) {
+      const mm = t.match(RX_Q); start(+mm[1], mm[2].trim()); auto = +mm[1];
+    } else if (L && L.fmt === 'decimal' && L.lvl === 0 && !RX_O.test(t)) {
+      start(++auto, t);
+    } else if (q && L && /letter/i.test(L.fmt) && !RX_O.test(t)) {
+      const ltr = nextLetter(); if (ltr) { q.opsi[ltr] = t; last = 'opsi:' + ltr; } else warn.push(`Soal no. ${q.no}: pilihan jawaban lebih dari 5 (A–E), sisanya dilewati.`);
+    } else if (q && RX_O.test(t)) {
+      const mm = t.match(RX_O), ltr = mm[1].toUpperCase(); q.opsi[ltr] = mm[2].trim(); last = 'opsi:' + ltr;
+    } else if (q && (RX_B.test(t) || (L && (L.fmt === 'bullet' || L.lvl > 0)))) {
+      const mm = t.match(RX_B); if (mm || t) { q.per.push(mm ? mm[1].trim() : t); last = 'per'; }
+    } else if (q && t) {
+      if (last === 'soal') q.soal.push(t);
+      else if (last.indexOf('opsi:') === 0) q.opsi[last.slice(5)] += ' ' + t;
+      else if (last.indexOf('meta:') === 0 && ['rubrik', 'kunci', 'bahas'].indexOf(last.slice(5)) >= 0) q.meta[last.slice(5)] += '\n' + t;
+      else if (last === 'per') q.per[q.per.length - 1] += ' ' + t;
+      else q.soal.push(t);
+    }
+    if (q && p.imgs.length) { p.imgs.forEach((id) => { if (q.img.length) warn.push(`Soal no. ${q.no}: hanya 1 gambar per soal, gambar berikutnya dilewati.`); else q.img.push(id); }); }
+  });
+  if (mk < 0 && !qs.length) warn.push('Tidak ada soal yang dikenali. Pastikan setiap soal diawali nomor, misalnya "1. Teks soal".');
+  return { items: qs.map((x) => soalRowOf(x, def)), warnings: warn.filter((v, i, a) => a.indexOf(v) === i) };
+}
+function soalRowOf(q, def) {
+  const kunci = String(q.meta.kunci || '').trim(), opsiN = Object.keys(q.opsi).length;
+  const letters = (kunci.toUpperCase().match(/\b[A-E]\b/g) || (/^[A-E]{2,5}$/i.test(kunci) ? kunci.toUpperCase().split('') : []));
+  let tipe = normTipe(q.meta.tipe || def.tipe);
+  if (!tipe) tipe = q.per.length ? 'KATEGORI' : opsiN >= 2 ? (letters.length > 1 ? 'MCMA' : 'PG') : 'ESAI';
+  const skor = String(q.meta.skor || def.skor || SKOR_DEF[tipe] || 1).replace(',', '.').replace(/[^0-9.]/g, '');
+  const text = q.soal.join('\n').trim(), row = { tipe, soal: text, skor, mode_skor: String(q.meta.mode || def.mode || '').toUpperCase() };
+  if (tipe === 'PG' || tipe === 'MCMA') {
+    'ABCDE'.split('').forEach((L) => { row['opsi_' + L] = q.opsi[L] || ''; });
+    row.kunci = tipe === 'PG' ? (letters[0] || (kunci.match(/^[A-Ea-e]/) || [''])[0].toUpperCase()) : letters.join(',');
+  } else if (tipe === 'KATEGORI') {
+    const kat = q.meta.kategori ? q.meta.kategori.split(/[,;|]/).map((x) => x.trim()).filter(Boolean) : ['Benar', 'Salah'];
+    row.soal = [text].concat(q.per).map((x) => String(x).replace(/\|/g, '/')).join(' | ');
+    kat.slice(0, 5).forEach((x, i) => { row['opsi_' + 'ABCDE'[i]] = x; });
+    row.kunci = kunci.split(/[,;|]/).map((x) => x.trim()).filter(Boolean).join('|');
+  } else { row.opsi_A = q.meta.rubrik || ''; row.kunci = kunci; }
+  return { row, imgRef: q.img[0] || '', ref: 'Soal no. ' + q.no };
+}
+/** Baca Word: hasil {items:[{row, img, imgErr, ref}], warnings}. */
+async function parseDocxSoal(file) {
+  const zip = await (await loadJSZip()).loadAsync(file);
+  const f = zip.file('word/document.xml'); if (!f) throw new Error('Berkas bukan dokumen Word (.docx). Simpan ulang dari Word sebagai .docx.');
+  const doc = xmlOf(await f.async('string')), rels = await relsOf(zip, 'word/_rels/document.xml.rels', 'word/'), numFmt = await docxNumFmt(zip);
+  const res = soalFromParas(docxParas(descL(doc.documentElement, 'body'), numFmt));
+  for (const it of res.items) { if (it.imgRef) { const g = rels[it.imgRef] ? await zipImage(zip, rels[it.imgRef]) : { err: 'Gambar tertaut (bukan tertanam) tidak bisa dibaca. Tempel gambarnya langsung.' }; if (g.blob) { it.img = g.blob; it.imgName = g.name; } else it.imgErr = g.err; } }
+  return res;
+}
+const colIdx = (ref) => { const m = String(ref || '').match(/^([A-Z]+)/); if (!m) return -1; let n = 0; m[1].split('').forEach((c) => { n = n * 26 + c.charCodeAt(0) - 64; }); return n - 1; };
+/** Gambar "di dalam sel" Excel 365 (Sisipkan Gambar → Tempatkan di Sel): vm → metadata → richData → media. */
+async function xlsxCellImages(zip) {
+  const md = zip.file('xl/metadata.xml'), rv = zip.file('xl/richData/rdrichvalue.xml'); if (!md || !rv) return null;
+  const mx = xmlOf(await md.async('string')).documentElement, types = kidsL(descL(mx, 'metadataTypes'), 'metadataType').map((t) => t.getAttribute('name'));
+  const fm = {}; kidsL(mx, 'futureMetadata').forEach((f) => { fm[f.getAttribute('name')] = kidsL(f, 'bk').map((bk) => +(attrL(descL(bk, 'rvb'), 'i') || 0)); });
+  const vmList = kidsL(descL(mx, 'valueMetadata'), 'bk').map((bk) => { const rc = kidL(bk, 'rc'); const tn = types[+rc.getAttribute('t') - 1]; return tn && fm[tn] ? fm[tn][+rc.getAttribute('v')] : -1; });
+  const rvx = xmlOf(await rv.async('string')).documentElement, rvs = kidsL(rvx, 'rv');
+  const stF = zip.file('xl/richData/rdrichvaluestructure.xml'), keyPos = {};
+  if (stF) kidsL(xmlOf(await stF.async('string')).documentElement, 's').forEach((s, i) => { keyPos[i] = kidsL(s, 'k').findIndex((k) => k.getAttribute('n') === '_rvRel:LocalImageIdentifier'); });
+  const relF = zip.file('xl/richData/richValueRel.xml'); if (!relF) return null;
+  const relIds = kidsL(xmlOf(await relF.async('string')).documentElement, 'rel').map((r) => r.getAttributeNS(R_NS, 'id'));
+  const rels = await relsOf(zip, 'xl/richData/_rels/richValueRel.xml.rels', 'xl/richData/');
+  return (vm) => { const ri = vmList[vm - 1]; const r = rvs[ri]; if (!r) return ''; const pos = keyPos[+r.getAttribute('s')]; const vals = kidsL(r, 'v'); const li = +(vals[pos >= 0 ? pos : 0] || {}).textContent; return rels[relIds[li]] || ''; };
+}
+/** Baca Excel: lembar berisi kolom "soal" (mis. "Soal"), gambar tertanam per baris (di atas sel / di dalam sel). */
+async function parseXlsxSoal(file) {
+  const zip = await (await loadJSZip()).loadAsync(file);
+  const wbF = zip.file('xl/workbook.xml'); if (!wbF) throw new Error('Berkas bukan Excel (.xlsx) yang valid.');
+  const wb = xmlOf(await wbF.async('string')).documentElement, wbRels = await relsOf(zip, 'xl/_rels/workbook.xml.rels', 'xl/');
+  const ss = []; const ssF = zip.file('xl/sharedStrings.xml');
+  if (ssF) kidsL(xmlOf(await ssF.async('string')).documentElement, 'si').forEach((si) => { let s = ''; const walk = (el) => { for (const c of el.children) { if (c.localName === 'rPh') continue; if (c.localName === 't') s += c.textContent; else walk(c); } }; walk(si); ss.push(s); });
+  const sheets = kidsL(descL(wb, 'sheets'), 'sheet').map((s) => ({ name: s.getAttribute('name') || '', path: wbRels[s.getAttributeNS(R_NS, 'id')] })).filter((s) => s.path && zip.file(s.path));
+  sheets.sort((a, b) => (/soal/i.test(b.name) ? 1 : 0) - (/soal/i.test(a.name) ? 1 : 0));
+  const cellImg = await xlsxCellImages(zip).catch(() => null);
+  for (const sh of sheets) {
+    const sx = xmlOf(await zip.file(sh.path).async('string')).documentElement, grid = [], vmAt = {};
+    kidsL(descL(sx, 'sheetData'), 'row').forEach((r) => {
+      const rn = +r.getAttribute('r'), cells = [];
+      kidsL(r, 'c').forEach((c, ci) => {
+        const t = c.getAttribute('t'), ix = c.getAttribute('r') ? colIdx(c.getAttribute('r')) : ci, v = kidL(c, 'v');
+        let val = v ? v.textContent : '';
+        if (t === 's') val = ss[+val] || ''; else if (t === 'inlineStr') { val = allL(c, 't').map((x) => x.textContent).join(''); } else if (t === 'b') val = val === '1' ? 'TRUE' : 'FALSE'; else if (t === 'e') val = '';
+        else if (val && /^-?\d+\.\d{6,}$/.test(val)) val = String(Math.round(Number(val) * 1e6) / 1e6);
+        cells[ix] = val;
+        if (c.getAttribute('vm')) vmAt[rn] = +c.getAttribute('vm');
+      });
+      grid.push({ rn, cells });
+    });
+    const head = grid[0] ? Array.from(grid[0].cells, (x) => String(x || '').trim().toLowerCase().replace(/\s+/g, '_')) : [];
+    if (head.indexOf('soal') < 0) continue;
+    // gambar mengambang (di atas sel) dari drawing lembar ini
+    const imgAt = {}, shDir = sh.path.replace(/[^/]+$/, ''), shRels = await relsOf(zip, shDir + '_rels/' + sh.path.split('/').pop() + '.rels', shDir);
+    const drw = Object.keys(shRels).map((k) => shRels[k]).find((p) => /drawings\/drawing\d*\.xml$/.test(p));
+    if (drw && zip.file(drw)) {
+      const dx = xmlOf(await zip.file(drw).async('string')).documentElement, dDir = drw.replace(/[^/]+$/, ''), dRels = await relsOf(zip, dDir + '_rels/' + drw.split('/').pop() + '.rels', dDir);
+      Array.from(dx.children).filter((a) => /Anchor$/.test(a.localName)).forEach((a) => {
+        const blip = descL(a, 'blip'), id = blip && blip.getAttributeNS(R_NS, 'embed'); if (!id || !dRels[id]) return;
+        const fr = kidL(a, 'from'), to = kidL(a, 'to');
+        let rn = fr ? +descL(fr, 'row').textContent + 1 : 0; if (rn <= 1 && to) rn = +descL(to, 'row').textContent + 1;
+        if (rn > 1 && !imgAt[rn]) imgAt[rn] = dRels[id];
+      });
+    }
+    if (cellImg) Object.keys(vmAt).forEach((rn) => { if (!imgAt[rn]) { const p = cellImg(vmAt[rn]); if (p) imgAt[rn] = p; } });
+    const items = [];
+    for (const g of grid.slice(1)) {
+      const o = {}; head.forEach((k, i) => { if (k) o[k.replace(/^opsi_([a-e])$/, (m, l) => 'opsi_' + l.toUpperCase())] = String(g.cells[i] === undefined ? '' : g.cells[i]).trim(); });
+      if (!Object.keys(o).some((k) => o[k]) && !imgAt[g.rn]) continue;
+      const it = { row: o, ref: 'Baris ' + g.rn };
+      if (imgAt[g.rn]) { const im = await zipImage(zip, imgAt[g.rn]); if (im.blob) { it.img = im.blob; it.imgName = im.name; } else it.imgErr = im.err; }
+      items.push(it);
+    }
+    return { items, warnings: [] };
+  }
+  throw new Error('Tidak ditemukan lembar dengan kolom "soal". Gunakan template Excel dari aplikasi.');
+}
+/** Kecilkan gambar soal (sisi terpanjang 1280 px). Diagram PNG kecil tetap PNG agar tetap tajam. */
+function prepSoalImage(blob, name) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob), img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const keep = blob.type === 'image/png' && s === 1 && blob.size < 400000 || blob.type === 'image/jpeg' && s === 1 && blob.size < 300000;
+      const done = (b, mime) => { URL.revokeObjectURL(url); const r = new FileReader(); r.onload = () => res({ name: (name || 'gambar').replace(/\.\w+$/, '') + (mime === 'image/png' ? '.png' : '.jpg'), mime, data: String(r.result).split(',')[1] }); r.readAsDataURL(b); };
+      if (keep) { done(blob, blob.type); return; }
+      const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(img.width * s)); cv.height = Math.max(1, Math.round(img.height * s));
+      const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
+      cv.toBlob((b) => done(b || blob, b ? 'image/jpeg' : blob.type), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Gambar "' + (name || '') + '" rusak atau formatnya tidak dikenali.')); };
+    img.src = url;
+  });
+}
+async function blobKey(b) { try { const h = await crypto.subtle.digest('SHA-1', await b.arrayBuffer()); return Array.from(new Uint8Array(h)).map((x) => x.toString(16).padStart(2, '0')).join(''); } catch (e) { return b.size + ':' + b.type; } }
+/** Unggah gambar soal secara bertahap (maks 6 gambar / ±4 MB per panggilan). Kembalikan Map(item → file_id). */
+async function uploadSoalImages(items, onProgress) {
+  const byKey = {}, order = [];
+  for (const it of items) { const k = await blobKey(it.img); if (!byKey[k]) { byKey[k] = { it, users: [] }; order.push(k); } byKey[k].users.push(it); }
+  const ids = new Map(); let done = 0, batch = [], size = 0;
+  const flush = async () => {
+    if (!batch.length) return;
+    const r = await call('file.uploadMany', { folder: 'soal', files: batch.map((b) => b.f) }, { silent: true, timeout: 180000, retries: 2 });
+    r.files.forEach((f, i) => byKey[batch[i].k].users.forEach((u) => ids.set(u, f.file_id)));
+    done += batch.length; onProgress && onProgress(done, order.length); batch = []; size = 0;
+  };
+  onProgress && onProgress(0, order.length);
+  for (const k of order) {
+    const f = await prepSoalImage(byKey[k].it.img, byKey[k].it.imgName);
+    if (batch.length && (batch.length >= 6 || size + f.data.length > 4.2e6)) await flush();
+    batch.push({ k, f }); size += f.data.length;
+  }
+  await flush();
+  return ids;
+}
+const btnLabel = (btn, t) => { if (btn) btn.innerHTML = `<span class="spin"></span>${esc(t)}`; };
 (window.__SP_F__ = window.__SP_F__ || {}).umum = 1;

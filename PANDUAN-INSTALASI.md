@@ -1,4 +1,4 @@
-# Panduan Instalasi SMAPATISPA LEARNING v2.0
+# Panduan Instalasi SMAPATISPA LEARNING v2.2
 **Frontend di GitHub Pages + Google Apps Script sebagai REST API**
 
 ```
@@ -24,10 +24,26 @@ Data lama **tetap dipakai**: spreadsheet, akun, tugas, dan ujian tidak berubah.
 
 ---
 
+## Pembaruan v2.2 — jadwal pelajaran, kelas eskul/pengayaan, import soal Word & Excel bergambar
+
+Bila aplikasi sudah berjalan, cukup lakukan dua langkah ini. Data lama tidak berubah.
+
+1. **Backend:** tempel **Kode.gs v2.2.0** di Apps Script lalu Simpan. Buka **Terapkan → Kelola deployment**, pilih deployment yang dipakai situs (ID-nya sama dengan `GAS_URL` di `js/config.js`), lalu **✏️ → Version: New version → Deploy**.
+   - Sheet **Jadwal** dan kolom baru di sheet **Kelas** dibuat otomatis pada permintaan pertama setelah deploy. Bisa juga dipastikan dengan menjalankan `cekInstalasi`.
+   - Cek versi: buka `URL_EXEC?t=1`, harus tampil `"version":"2.2.0"`.
+2. **Frontend:** salin isi ZIP terbaru ke folder `smapatispa-learning` (pilih **Ganti** bila ditanya). File yang berubah ada di `css/`, `js/`, dan folder baru `templates/`. Lalu jalankan `git add .` → `git commit -m "v2.2 jadwal eskul import word"` → `git push`.
+
+**Fitur baru:**
+- **Jadwal Pelajaran** (menu Admin). Atur **Jam Pelajaran** dulu, termasuk hari dengan jam khusus seperti Jumat. Setelah itu klik kotak jam untuk memilih mapel–guru, atau isi semuanya lewat **Import Excel** (template berisi daftar kelas, mapel, guru, dan jam). Simpan berjalan otomatis. Guru yang bentrok jam diberi tanda merah. Guru dan siswa melihat jadwalnya di dashboard dan di menu Jadwal. Guru bisa langsung membuka presensi dari jadwal.
+- **Kelas eskul/pengayaan** (Data Akademik → Kelas → **Eskul / Pengayaan**). Anggotanya bisa seluruh siswa dari beberapa rombel dan/atau siswa pilihan. Kelas ini bisa dipakai untuk penugasan mengajar, tugas, ujian CBT, presensi, agenda, dan jadwal. Pembina mendapat menu kelas binaan.
+- **Import soal CBT** (Bank Soal → Import). Bisa dari **Word (.docx)**: ketik seperti lembar ujian dengan baris `KUNCI: B` dan gambar ditempel di bawah soal. Bisa juga dari **Excel (.xlsx)**: gambar ditempel di kolom `gambar` pada baris soalnya. Template keduanya tersedia di halaman import. Gambar diperkecil otomatis dan disimpan di Drive.
+
+---
+
 ## Bagian A — Perbarui backend Apps Script (±5 menit)
 
 1. Buka proyek Apps Script SMAPATISPA LEARNING yang sudah ada.
-2. Buka file **Kode.gs**, hapus seluruh isinya (Ctrl+A → Delete), lalu tempel isi **Kode.gs v2.0.0**. Tekan **Simpan** (Ctrl+S).
+2. Buka file **Kode.gs**, hapus seluruh isinya (Ctrl+A → Delete), lalu tempel isi **Kode.gs v2.2.0**. Tekan **Simpan** (Ctrl+S).
 3. **Hapus** file HTML **Index**, **Stylesheet**, dan **JavaScript** dari proyek. Klik ⋮ di samping nama file → Hapus. File-file itu sudah pindah ke GitHub.
 4. **Tidak perlu** menjalankan `setupAppEnvironment` lagi, karena data sudah ada. Fungsi itu hanya untuk proyek yang benar-benar baru.
 5. Pilih fungsi **`cekInstalasi`** → ▶ Jalankan → buka *Log eksekusi*. Semua baris harus ✅, kecuali "Alamat frontend" yang boleh ❌ dulu.
@@ -95,7 +111,12 @@ Situs diperbarui dalam 1–2 menit. Tekan **Ctrl+Shift+R** bila yang tampil masi
    4. Salin **Client ID**, tempel di Pengaturan → Login & Akses, lalu **Simpan**.
 
    Tanpa langkah ini, semua pengguna tetap bisa masuk dengan username dan kata sandi.
-3. **Ganti atau hapus akun demo**: `admin/admin123`, `suwandi/guru123`, siswa `/siswa123`.
+3. **Hapus data contoh** setelah selesai mencoba: **Dashboard Admin → banner "Data contoh…" → Tinjau & Hapus**, atau **Pengaturan → Cadangan & Log → Tinjau & Hapus Data Contoh**.
+   - Yang dihapus: akun guru/siswa contoh (`suwandi`, `andi`, … dan siswa NIS `2223…`) beserta tugas, materi, ujian, soal, presensi, dan agendanya.
+   - Akun admin dan akun yang Anda buat atau import tetap aman. Spreadsheet dicadangkan otomatis sebelum menghapus.
+   - Kelas contoh yang sudah berisi siswa asli tidak dihapus, cukup ganti namanya di Data Akademik → Kelas.
+   - Cara lain: di editor Apps Script, jalankan fungsi `hapusDataContoh`.
+4. Ganti kata sandi admin bila masih `admin123`.
 
 ---
 
@@ -117,5 +138,10 @@ Situs diperbarui dalam 1–2 menit. Tekan **Ctrl+Shift+R** bila yang tampil masi
 | Perubahan tidak muncul | Cache browser | Ctrl+Shift+R, atau buka di jendela Samaran |
 | Tombol "Masuk dengan Google" tidak muncul atau error | Client ID belum diisi, atau origin tidak cocok | Origin harus persis `https://USERNAME.github.io` |
 | Kode.gs diubah tapi tidak berefek | Belum membuat versi deployment baru | Kelola deployment → Edit → Versi baru |
+| Tombol "Template Word/Excel" menampilkan 404 | Folder `templates/` belum ikut di-push | Salin folder `templates` dari ZIP ke folder proyek, lalu `git add .` → `git commit` → `git push` |
+| Import Word: soal tidak terbaca | Nomor soal atau huruf pilihan tidak diikuti titik/kurung | Tulis `1. Teks soal` dan `A. pilihan`. Jangan hapus garis `=== MULAI SOAL ===` di template. |
+| Import: "Format gambar EMF/WMF tidak didukung" | Gambar ditempel dari aplikasi lain dalam format lama | Simpan gambar sebagai PNG/JPG, lalu tempel ulang ke Word/Excel |
+| Jadwal tidak muncul di dashboard guru/siswa | Jadwal belum diisi atau Kode.gs belum versi 2.2.0 | Cek `URL_EXEC?t=1`, lalu isi jadwal di menu Jadwal Pelajaran (Admin) |
+| Import akun: *Kelas "XI-2" tidak dikenal* | Kolom `kelas` di berkas tidak cocok dengan nama kelas di **Data Akademik → Kelas** | Tulis nama kelas sesuai daftar di jendela Import (singkatan seperti `XI-2` atau `11-2` diterima bila hanya cocok dengan satu kelas). Bisa juga mengganti nama kelas di Data Akademik sesuai berkas. Template terbaru berisi lembar **Daftar Kelas**. |
 
 Diagnosis kecepatan: buka aplikasi di laptop, tekan F12 → Console, lalu ketik `Perf.table()`. Kolom *server* menunjukkan waktu kerja Apps Script, sedangkan *net* adalah waktu jaringan ditambah pemanasan server.

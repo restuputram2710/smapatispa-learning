@@ -15,9 +15,10 @@ js/core.js          utilitas, API fetch, router, komponen UI
 js/shell.js         navigasi, login, inisialisasi
 js/siswa.js         halaman siswa + mesin ujian CBT
 js/guru.js          dashboard guru, materi & tugas, bank soal, ujian, monitor, koreksi, hasil
-js/umum.js          presensi, wali kelas, agenda, laporan, akun
+js/umum.js          presensi, wali kelas, agenda, laporan, akun, jadwal pelajaran, kelas eskul, import soal Word/Excel
 js/admin.js         dashboard admin, pengguna, data akademik, pengaturan
 js/main.js          titik mulai
+templates/          template import soal CBT (Word & Excel)
 ```
 
 ## Memperbarui

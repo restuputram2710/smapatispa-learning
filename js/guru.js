@@ -36,6 +36,7 @@ route('g-dash', {
       <div class="card card-p mt16 flex items-c g12 wrap"><span class="small bold flex items-c g6">${I('sparkles', 'ic-sm ink-p')}Aksi Cepat:</span>
         <button class="btn btn-sm btn-secondary" onclick="go('g-konten',{form:'tugas'})">${I('plus', 'ic-sm')}Buat Tugas</button><button class="btn btn-sm btn-secondary" onclick="go('g-konten',{form:'materi'})">${I('upload', 'ic-sm')}Unggah Materi</button>
         <button class="btn btn-sm btn-secondary" onclick="go('g-ujian-form',{})">${I('exam', 'ic-sm')}Buat Ujian CBT</button><button class="btn btn-sm btn-secondary" onclick="go('g-absensi')">${I('user-plus', 'ic-sm')}Isi Absensi Hari Ini</button></div>
+      ${jadwalStrip('ajar')}
       <div class="split mt16"><div class="col g16">
         <div class="card"><div class="card-hd"><div><h3>Tugas & Ujian Memerlukan Tindakan</h3><p class="small muted">Pantau status pengerjaan siswa dan beri nilai sebelum tenggat berakhir</p></div>${act.length ? pill(act.length + ' item', 'err') : ''}</div>
           ${act.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Tugas / Ujian</th><th>Kelas</th><th>Waktu / Tenggat</th><th>Progres</th><th>Status</th><th></th></tr></thead><tbody>${act.map((a) => `<tr><td><div class="flex items-c g12"><div class="tile sm ${a.tone}">${I(a.ic)}</div><div style="min-width:0"><div class="bold clamp2">${esc(a.judul)}</div><div class="xs muted">${esc(a.sub)}</div></div></div></td><td class="mono small">${esc(a.kelas)}</td><td class="small">${esc(a.waktu)}</td>
@@ -369,64 +370,103 @@ function delSoal(id) {
 }
 
 // ── Import soal (wizard 3 langkah) ──
-const IMPORT_COLS = ['tipe', 'soal', 'opsi_A', 'opsi_B', 'opsi_C', 'opsi_D', 'opsi_E', 'kunci', 'skor', 'mode_skor', 'url_gambar'];
+const IMPORT_COLS = ['tipe', 'soal', 'opsi_A', 'opsi_B', 'opsi_C', 'opsi_D', 'opsi_E', 'kunci', 'skor', 'mode_skor', 'gambar'];
 route('g-import', {
-  title: 'Import Soal Excel', roles: ['GURU', 'ADMIN'], back: 'g-bank', nav: 'g-bank',
+  title: 'Import Soal', roles: ['GURU', 'ADMIN'], back: 'g-bank', nav: 'g-bank',
   render() {
-    const W = S.c.imp || (S.c.imp = { step: 1, mapel: (G().penugasan[0] || {}).mapel_id, rows: null, res: null, file: '' });
+    const W = S.c.imp || (S.c.imp = { step: 1, mapel: (G().penugasan[0] || {}).mapel_id, items: null, res: null, file: '', extra: {}, warn: [] });
     const mapels = uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id);
     if (hasRole('ADMIN')) (B().mapel || []).forEach((m) => { if (mapels.indexOf(m.mapel_id) < 0) mapels.push(m.mapel_id); });
     const step = (n, t) => `<div class="card" style="padding:14px 16px;flex:1;min-width:200px;${W.step === n ? 'background:var(--p600);color:#fff;border-color:var(--p600)' : W.step > n ? 'background:var(--ok-t);border-color:rgba(22,163,74,.3)' : ''}"><div class="flex items-c g12"><span class="tile sm" style="${W.step === n ? 'background:#fff;color:var(--p600)' : W.step > n ? 'background:var(--ok);color:#fff' : ''}">${W.step > n ? I('check') : n}</span><div><div class="xs bold upper" style="opacity:.8">Langkah ${n}${W.step === n ? ' (aktif)' : ''}</div><div class="bold">${t}</div></div></div></div>`;
-    const res = W.res;
+    const res = W.res, nImg = res ? res.valid.filter((v) => (W.items[v.i] || {}).img).length : 0, nExtra = Object.keys(W.extra || {}).length;
+    const thumb = (it) => it && it.img ? `<img class="imp-thumb" src="${impThumb(it)}" alt="" onclick="event.stopPropagation();impZoom(${W.items.indexOf(it)})">` : it && it.imgErr ? `<span class="xs ink-warn" title="${esc(it.imgErr)}">${I('alert', 'ic-sm')} gambar dilewati</span>` : '<span class="xs muted">—</span>';
     return `<div class="page"><button class="back-link" onclick="back('g-bank')">${I('arrow-l', 'ic-sm')}Kembali ke Bank Soal</button>
-      <div class="page-hd"><div><h1>Import Butir Soal</h1><p class="sub">Impor bank soal secara massal dari template Excel (.xlsx), CSV, atau tautan Google Sheets.</p></div></div>
+      <div class="page-hd"><div><h1>Import Butir Soal</h1><p class="sub">Impor soal dari Word (.docx), Excel (.xlsx/.csv), atau Google Sheets, lengkap dengan gambar soal.</p></div></div>
       <div class="flex g12 wrap">${step(1, 'Unduh Template')}${step(2, 'Unggah Berkas')}${step(3, 'Pratinjau & Simpan')}</div>
       <div class="split mt16"><div class="col g16">
         <div class="card card-p"><h3>${I('upload', 'ink-p')} Unggah berkas soal</h3>
           <div class="field mt12"><label class="label">Mapel tujuan</label><select class="select" onchange="S.c.imp.mapel=this.value">${mapels.map((m) => `<option value="${m}" ${W.mapel === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select></div>
-          <label class="upload mt12" id="impDrop">${I('file-text', 'ic-lg')}<div class="bold mt8">${W.file ? esc(W.file) : 'Pilih berkas .xlsx atau .csv'}</div><div class="small muted">Baris pertama berisi nama kolom sesuai template</div><input type="file" hidden accept=".xlsx,.xls,.csv" onchange="impFile(this.files[0])"></label>
+          <label class="upload mt12" id="impDrop">${I('file-text', 'ic-lg')}<div class="bold mt8">${W.file ? esc(W.file) : 'Pilih berkas Word (.docx) atau Excel (.xlsx, .csv)'}</div><div class="small muted">Gambar yang ditempel di dalam berkas ikut terbaca</div><input type="file" hidden accept=".docx,.xlsx,.xls,.csv" onchange="impFile(this.files[0]);this.value=''"></label>
+          <label class="btn btn-ghost btn-sm mt8" style="cursor:pointer">${I('image', 'ic-sm')}${nExtra ? nExtra + ' gambar tambahan dipilih' : 'Gambar terpisah (opsional)'}<input type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange="impExtra(this.files);this.value=''"></label>
+          <p class="help">Pakai "gambar terpisah" bila kolom <b>gambar</b> di Excel berisi nama berkas, misalnya <span class="mono">grafik1.png</span>.</p>
           <div class="or">atau</div>
           <div class="flex g8"><div class="input-ic f1">${I('link')}<input class="input" id="impUrl" placeholder="Tempel tautan Google Sheet"></div><button class="btn btn-secondary" onclick="impSheet()">Proses</button></div>
           <p class="help mt8">Sheet harus dibagikan "Siapa pun yang memiliki link dapat melihat".</p></div>
-        ${res ? `<div class="card"><div class="card-hd" style="flex-wrap:wrap"><div class="flex items-c g12"><div class="tile">${I('chart')}</div><div><h3>Hasil Validasi: ${res.total} Baris Dideteksi</h3><p class="small muted">Sistem memeriksa kunci jawaban, skor, dan struktur pilihan.</p></div></div>
-            <div class="flex g8">${pill(res.valid.length + ' siap impor', 'ok', 'check-c')}${res.errors.length ? pill(res.errors.length + ' perlu diperbaiki', 'err', 'alert-c') : ''}</div></div>
-          <div class="tbl-wrap" style="max-height:520px"><table class="tbl compact"><thead><tr><th>Baris</th><th>Tipe</th><th>Pratinjau</th><th>Kunci</th><th class="n">Skor</th><th>Status</th></tr></thead><tbody>
-            ${res.all.map((r) => r.err ? `<tr class="row-err"><td class="mono">#${r.i + 2}</td><td>${esc(r.raw.tipe || '-')}</td><td class="small">${esc(String(r.raw.soal || '').slice(0, 90))}</td><td class="mono">${esc(r.raw.kunci || 'KOSONG')}</td><td class="n mono">${esc(r.raw.skor || '')}</td><td class="small ink-err">${I('alert', 'ic-sm')} ${esc(r.err)}</td></tr>`
-              : `<tr><td class="mono">#${r.i + 2}</td><td>${pill(r.tipe, r.tipe === 'ESAI' ? 'vio' : 'info')}</td><td class="small">${esc(r.teks)}</td><td class="mono small">${esc(fmtKunci(r.kunci))}</td><td class="n mono">${fmtN(r.skor)}</td><td>${pill('Valid', 'ok', 'check')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-      </div><div class="col g16"><div class="card card-p"><h3>${I('download', 'ink-p')} Template Resmi</h3><p class="small tx2 mt8">Format kolom: <span class="mono xs">${IMPORT_COLS.join(', ')}</span></p>
-          <ul class="small tx2" style="padding-left:18px;margin:12px 0 0;line-height:1.8"><li><b>tipe</b>: PG, MCMA, KATEGORI, atau ESAI</li><li><b>kunci</b> MCMA ditulis <span class="mono">A,D</span></li><li>KATEGORI: soal & pernyataan dipisah <span class="mono">|</span>, kunci <span class="mono">Benar|Salah|Benar</span></li><li>ESAI: <b>opsi_A</b> = rubrik, <b>kunci</b> = acuan jawaban</li><li><b>url_gambar</b>: tautan Google Drive (opsional)</li></ul>
-          <button class="btn btn-secondary btn-block mt16" onclick="downloadTemplateSoal()">${I('download')}Unduh Template (.xlsx)</button></div>
-        <div class="card card-p"><div class="flex items-c g8">${I('shield', 'ink-ok')}<b>Proteksi integritas</b></div><p class="small tx2 mt8">Baris bermasalah dilewati otomatis sehingga tidak masuk ke bank soal. Perbaiki di berkas lalu unggah ulang.</p></div></div></div>
-      ${res && res.valid.length ? `<div class="sticky-bar"><span class="small muted f1">${res.valid.length} soal valid akan disimpan ke ${esc(mapelNm(W.mapel))}.</span><button class="btn btn-ghost" onclick="S.c.imp=null;rerender()">Batal / Unggah Ulang</button><button class="btn btn-primary btn-lg" id="impSave" onclick="impSave()">${I('cloud-ok')}Simpan ${res.valid.length} Soal Valid ke Bank Soal${I('arrow-r')}</button></div>` : ''}</div>`;
+        ${W.busy ? `<div class="card card-p">${skel(16, '40%')}<p class="small muted mt12">${esc(W.busy)}</p></div>` : ''}
+        ${W.warn && W.warn.length ? `<div class="banner banner-warn">${I('alert')}<div class="f1 small">${W.warn.slice(0, 6).map(esc).join('<br>')}${W.warn.length > 6 ? '<br>…' : ''}</div></div>` : ''}
+        ${res ? `<div class="card"><div class="card-hd" style="flex-wrap:wrap"><div class="flex items-c g12"><div class="tile">${I('chart')}</div><div><h3>Hasil Validasi: ${res.total} Soal Dideteksi</h3><p class="small muted">Sistem memeriksa kunci jawaban, skor, struktur pilihan, dan gambar.</p></div></div>
+            <div class="flex g8 wrap">${pill(res.valid.length + ' siap impor', 'ok', 'check-c')}${nImg ? pill(nImg + ' bergambar', 'info', 'image') : ''}${res.errors.length ? pill(res.errors.length + ' perlu diperbaiki', 'err', 'alert-c') : ''}</div></div>
+          <div class="tbl-wrap" style="max-height:520px"><table class="tbl compact"><thead><tr><th>Asal</th><th>Tipe</th><th>Pratinjau</th><th>Gambar</th><th>Kunci</th><th class="n">Skor</th><th>Status</th></tr></thead><tbody>
+            ${res.all.map((r) => { const it = W.items[r.i] || {}; return r.err ? `<tr class="row-err"><td class="xs mono">${esc(it.ref || '#' + (r.i + 2))}</td><td>${esc((it.row || {}).tipe || '-')}</td><td class="small">${esc(String((it.row || {}).soal || '').slice(0, 90))}</td><td>${thumb(it)}</td><td class="mono">${esc((it.row || {}).kunci || 'KOSONG')}</td><td class="n mono">${esc((it.row || {}).skor || '')}</td><td class="small ink-err">${I('alert', 'ic-sm')} ${esc(r.err)}</td></tr>`
+              : `<tr><td class="xs mono">${esc(it.ref || '#' + (r.i + 2))}</td><td>${pill(r.tipe, r.tipe === 'ESAI' ? 'vio' : 'info')}</td><td class="small">${esc(r.teks)}</td><td>${thumb(it)}</td><td class="mono small">${esc(fmtKunci(r.kunci))}</td><td class="n mono">${fmtN(r.skor)}</td><td>${pill('Valid', 'ok', 'check')}</td></tr>`; }).join('')}</tbody></table></div></div>` : ''}
+      </div><div class="col g16"><div class="card card-p"><h3>${I('download', 'ink-p')} Template Resmi</h3>
+          <p class="small tx2 mt8"><b>Word</b>: ketik soal seperti lembar ujian biasa — nomor, pilihan A–E, lalu baris <span class="mono">KUNCI: B</span>. Gambar cukup ditempel di bawah teks soal.</p>
+          <a class="btn btn-secondary btn-block mt12" href="templates/template-soal-cbt.docx" download onclick="S.c.imp.step=Math.max(S.c.imp.step,2);setTimeout(rerender,50)">${I('file-text')}Template Word (.docx)</a>
+          <p class="small tx2 mt16"><b>Excel</b>: satu baris = satu soal. Kolom: <span class="mono xs">${IMPORT_COLS.join(', ')}</span>. Gambar ditempel di kolom <b>gambar</b> pada baris soalnya.</p>
+          <a class="btn btn-secondary btn-block mt12" href="templates/template-soal-cbt.xlsx" download onclick="S.c.imp.step=Math.max(S.c.imp.step,2);setTimeout(rerender,50)">${I('table')}Template Excel (.xlsx)</a>
+          <ul class="small tx2" style="padding-left:18px;margin:14px 0 0;line-height:1.8"><li><b>Tipe</b>: PG, MCMA (PG kompleks), KATEGORI (benar–salah), ESAI</li><li>Kunci MCMA: <span class="mono">A, C</span> · benar–salah: <span class="mono">Benar, Salah</span></li><li>Gambar otomatis diperkecil & disimpan di Drive sekolah</li><li>Format gambar: PNG atau JPG, satu gambar per soal</li></ul></div>
+        <div class="card card-p"><div class="flex items-c g8">${I('shield', 'ink-ok')}<b>Proteksi integritas</b></div><p class="small tx2 mt8">Soal bermasalah dilewati otomatis sehingga tidak masuk ke bank soal. Perbaiki di berkas lalu unggah ulang.</p></div></div></div>
+      ${res && res.valid.length ? `<div class="sticky-bar"><span class="small muted f1">${res.valid.length} soal valid${nImg ? ' (' + nImg + ' bergambar)' : ''} akan disimpan ke ${esc(mapelNm(W.mapel))}.</span><button class="btn btn-ghost" onclick="S.c.imp=null;rerender()">Batal / Unggah Ulang</button><button class="btn btn-primary btn-lg" id="impSave" onclick="impSave()">${I('cloud-ok')}Simpan ${res.valid.length} Soal ke Bank Soal${I('arrow-r')}</button></div>` : ''}</div>`;
   }
 });
 function fmtKunci(k) { try { const v = typeof k === 'string' ? JSON.parse(k) : k; return Array.isArray(v) ? v.join(v.some((x) => String(x).length > 1) ? ' | ' : ',') : v && v.acuan !== undefined ? 'Rubrik guru' : String(v); } catch (e) { return String(k); } }
-function downloadTemplateSoal() {
-  exportXlsx('template_soal_smapatispa', [{ name: 'Soal', rows: [IMPORT_COLS,
-    ['PG', 'Satuan SI untuk gaya adalah...', 'Newton', 'Joule', 'Watt', 'Pascal', 'Tesla', 'A', '2', '', ''],
-    ['MCMA', 'Besaran berikut yang termasuk besaran vektor adalah...', 'Gaya', 'Massa', 'Kecepatan', 'Suhu', 'Percepatan', 'A,C,E', '3', 'PROPORSIONAL', ''],
-    ['KATEGORI', 'Tentukan benar atau salah | Bumi berputar pada porosnya | Matahari mengelilingi bumi', 'Benar', 'Salah', '', '', '', 'Benar|Salah', '4', 'PROPORSIONAL', ''],
-    ['ESAI', 'Jelaskan perbedaan massa dan berat!', 'Skor penuh jika menyebut massa skalar dan berat vektor/gaya', '', '', '', '', 'Massa adalah jumlah materi (kg), berat adalah gaya gravitasi (N).', '10', '', '']] }]);
-  S.c.imp.step = Math.max(S.c.imp.step, 2); rerender();
+function impThumb(it) { if (!it.thumb) it.thumb = URL.createObjectURL(it.img); return it.thumb; }
+function impZoom(i) { const it = S.c.imp.items[i]; if (!it || !it.img) return; sheet({ title: esc(it.ref || 'Gambar soal'), size: 'wide', body: `<img src="${impThumb(it)}" alt="" style="width:100%;border-radius:12px;background:#fff">` }); }
+/** Baca berkas: Word & Excel memakai pembaca bawaan (dengan gambar); CSV/XLS lama lewat pembaca tabel. */
+async function impFile(file) {
+  if (!file) return;
+  const W = S.c.imp; W.file = file.name; W.res = null; W.warn = []; W.busy = 'Membaca berkas ' + file.name + '…'; rerender();
+  try {
+    let parsed;
+    if (/\.docx$/i.test(file.name)) parsed = await parseDocxSoal(file);
+    else if (/\.xlsx$/i.test(file.name)) parsed = await parseXlsxSoal(file);
+    else if (/\.doc$/i.test(file.name)) throw new Error('Format .doc lama tidak didukung. Buka di Word lalu simpan sebagai .docx.');
+    else { const rows = await readSheetFile(file); parsed = { items: rowsToObjs(rows).map((o, i) => ({ row: impNormKeys(o), ref: 'Baris ' + (i + 2) })), warnings: [] }; }
+    W.busy = ''; impSetItems(parsed);
+  } catch (e) { W.busy = ''; rerender(); failToast(e); }
 }
-function impFile(file) { if (!file) return; S.c.imp.file = file.name; readSheetFile(file).then((rows) => impValidate(rows)).catch((e) => failToast(e)); }
-function impSheet() { const url = $('#impUrl').value.trim(); if (!url) return; call('sheet.read', { url }).then((r) => { S.c.imp.file = 'Google Sheet'; impValidate(r.rows); }).catch(failToast); }
-function impValidate(rows) {
-  const objs = rowsToObjs(rows).map((o) => { const n = {}; Object.keys(o).forEach((k) => { n[k.replace(/^opsi_([a-e])$/, (m, l) => 'opsi_' + l.toUpperCase())] = o[k]; }); return n; });
-  if (!objs.length) { toast('Berkas kosong atau header tidak sesuai template.', 'warn'); return; }
-  call('soal.import', { mapel_id: S.c.imp.mapel, rows: objs, dry: true }).then((r) => {
-    const all = []; r.valid.forEach((v) => all.push(Object.assign({}, v, { skor: v.skor }))); r.errors.forEach((e) => all.push({ i: e.i, err: e.msg, raw: objs[e.i] }));
-    all.sort(by('i'));
-    S.c.imp.rows = objs; S.c.imp.res = { total: objs.length, valid: r.valid, errors: r.errors, all }; S.c.imp.step = 3; rerender();
-  }).catch(failToast);
+function impNormKeys(o) { const n = {}; Object.keys(o).forEach((k) => { n[k.replace(/^opsi_([a-e])$/, (m, l) => 'opsi_' + l.toUpperCase())] = o[k]; }); return n; }
+/** Gambar terpisah: dicocokkan dengan nama berkas di kolom gambar/url_gambar. */
+function impExtra(files) {
+  const W = S.c.imp; W.extra = W.extra || {};
+  Array.from(files || []).forEach((f) => { W.extra[f.name.toLowerCase()] = f; });
+  if (W.items) impSetItems({ items: W.items, warnings: W.warn }); else rerender();
 }
-function impSave() {
-  const W = S.c.imp, btn = $('#impSave'); btnBusy(btn, true, 'Menyimpan…');
-  const okIdx = {}; W.res.valid.forEach((v) => { okIdx[v.i] = 1; });
-  call('soal.import', { mapel_id: W.mapel, rows: W.rows.filter((r, i) => okIdx[i]) }).then((r) => {
+function impSheet() { const url = $('#impUrl').value.trim(); if (!url) return; call('sheet.read', { url }).then((r) => { S.c.imp.file = 'Google Sheet'; impSetItems({ items: rowsToObjs(r.rows).map((o, i) => ({ row: impNormKeys(o), ref: 'Baris ' + (i + 2) })), warnings: [] }); }).catch(failToast); }
+function impSetItems(parsed) {
+  const W = S.c.imp, items = (parsed.items || []).slice(0, 500), ex = W.extra || {};
+  if (!items.length) { W.items = null; W.res = null; W.warn = parsed.warnings || []; rerender(); toast((parsed.warnings || [])[0] || 'Tidak ada soal yang terbaca dari berkas.', 'warn'); return; }
+  items.forEach((it) => {
+    const nm = String(it.row.gambar || it.row.url_gambar || '').trim(), key = nm.split(/[\\/]/).pop().toLowerCase();
+    if (!it.img && /\.(png|jpe?g|gif|webp)$/i.test(key)) { if (ex[key]) { it.img = ex[key]; it.imgName = ex[key].name; it.imgErr = ''; } else it.imgErr = 'Berkas "' + nm + '" belum dipilih di "Gambar terpisah".'; }
+  });
+  W.items = items; W.warn = (parsed.warnings || []).concat((parsed.items || []).length > 500 ? ['Maksimal 500 soal per import; sisanya dilewati.'] : []);
+  const rows = items.map(impRowOut);
+  W.busy = 'Memeriksa ' + items.length + ' soal…'; rerender();
+  call('soal.import', { mapel_id: W.mapel, rows, dry: true }).then((r) => {
+    const all = []; r.valid.forEach((v) => all.push(v)); r.errors.forEach((e) => all.push({ i: e.i, err: e.msg })); all.sort(by('i'));
+    W.busy = ''; W.res = { total: items.length, valid: r.valid, errors: r.errors, all }; W.step = 3; rerender();
+  }).catch((e) => { W.busy = ''; rerender(); failToast(e); });
+}
+/** Baris untuk server: tanpa kolom bantu; bila gambar akan diunggah, nama berkas tidak dikirim sebagai tautan. */
+function impRowOut(it, gid) {
+  const r = Object.assign({}, it.row); Object.keys(r).forEach((k) => { if (k.charAt(0) === '_') delete r[k]; });
+  if (it.img || /\.(png|jpe?g|gif|webp)$/i.test(String(r.gambar || r.url_gambar || ''))) { delete r.gambar; if (!/^https?:/.test(r.url_gambar || '')) delete r.url_gambar; }
+  if (gid) r.gambar_id = gid;
+  return r;
+}
+async function impSave() {
+  const W = S.c.imp, btn = $('#impSave'), okIdx = {}; W.res.valid.forEach((v) => { okIdx[v.i] = 1; });
+  const sel = W.items.filter((it, i) => okIdx[i]), withImg = sel.filter((it) => it.img);
+  btnBusy(btn, true, 'Menyiapkan…');
+  try {
+    const ids = withImg.length ? await uploadSoalImages(withImg, (n, tot) => btnLabel(btn, `Mengunggah gambar ${n}/${tot}…`)) : new Map();
+    btnLabel(btn, 'Menyimpan soal…');
+    const r = await call('soal.import', { mapel_id: W.mapel, rows: sel.map((it) => impRowOut(it, ids.get(it))) });
     if (S.c.soal && S.c.soal.d) S.c.soal.d = r.soal.concat(S.c.soal.d);
-    toast(r.inserted + ' soal berhasil ditambahkan ke bank soal.', 'ok'); S.c.imp = null; go('g-bank', {}, { replace: true });
-  }).catch((e) => { btnBusy(btn, false); failToast(e); });
+    (W.items || []).forEach((it) => { if (it.thumb) URL.revokeObjectURL(it.thumb); });
+    toast(r.inserted + ' soal berhasil ditambahkan ke bank soal' + (ids.size ? ', ' + withImg.length + ' dengan gambar' : '') + '.', 'ok', 6000); S.c.imp = null; go('g-bank', {}, { replace: true });
+  } catch (e) { btnBusy(btn, false); failToast(e); }
 }
 
 // ── Daftar ujian ──
@@ -508,7 +548,7 @@ route('g-ujian-form', {
           <div class="grid gc2 mt16" style="grid-template-columns:1fr 1fr"><div class="info-tile" style="flex-direction:column;align-items:flex-start;gap:2px"><span class="xs muted">Jumlah butir</span><span class="b7" style="font-size:22px">${sel.length}</span></div><div class="info-tile" style="flex-direction:column;align-items:flex-start;gap:2px"><span class="xs muted">Total bobot</span><span class="b7" style="font-size:22px">${fmtN(totalBobot)}</span></div></div>
           <div class="col g8 mt16">${Object.keys(comp).map((k) => `<div class="flex jc-b small"><span class="tx2">${TIPE_SOAL[k]}</span><b class="mono">${comp[k][0]} soal · ${fmtN(comp[k][1])} poin</b></div>`).join('')}</div>
           ${U.pakai_token ? `<div class="token-card mt16"><div class="xs" style="color:#94A3B8">TOKEN UJIAN</div><div class="tk">${esc(U.token || 'AUTO')}</div></div>` : ''}
-          <div class="divider"></div><p class="small tx2">${I('users', 'ic-sm')} Estimasi peserta: <b>${G().siswa.filter((s) => U.kelas_ids.indexOf(s.kelas_id) >= 0).length} siswa</b> (${U.kelas_ids.length} kelas)</p>
+          <div class="divider"></div><p class="small tx2">${I('users', 'ic-sm')} Estimasi peserta: <b>${G().siswa.filter((s) => U.kelas_ids.some((k) => inKelas(s, k))).length} siswa</b> (${U.kelas_ids.length} kelas)</p>
           <p class="small tx2 mt8">${I('info', 'ic-sm')} Siswa menerima notifikasi saat ujian diterbitkan.</p>
           <div class="col g8 mt16"><button class="btn btn-primary btn-block" id="uPub" onclick="saveUjian('TERBIT')">${I('send')}${U.status === 'TERBIT' ? 'Simpan & Tetap Terbit' : 'Terbitkan & Jadwalkan'}</button><button class="btn btn-secondary btn-block" onclick="saveUjian('DRAF')">${I('file')}Simpan Draf</button><button class="btn btn-ghost btn-block" onclick="S.c.uForm=null;back('g-ujian')">Batal</button></div></div></div></div></div>`;
   },

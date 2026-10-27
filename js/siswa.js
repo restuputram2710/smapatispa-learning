@@ -60,7 +60,7 @@ route('s-home', {
           <button class="round" onclick="openNotif()" aria-label="Notifikasi">${I('bell')}${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ''}</button>
           <button onclick="go('akun')" style="border-radius:50%;border:2px solid rgba(255,255,255,.6)">${avatar(u.nama, u.foto)}</button></div>
         <div class="greet">${D.greet()},</div><h1>Halo, ${esc(u.nama)}</h1>
-        <div class="meta">${I('door', 'ic-sm')}Kelas ${esc(kelasNm(u.kelas_id))}${ta ? ' · Semester ' + esc(ta.semester) + ' ' + esc(ta.nama) : ''}</div>
+        <div class="meta">${I('door', 'ic-sm')}Kelas ${esc(kelasNm(u.kelas_id))}${(u.kelas_x || []).length ? ' · ' + esc(u.kelas_x.map(kelasNm).join(', ')) : ''}${ta ? ' · Semester ' + esc(ta.semester) + ' ' + esc(ta.nama) : ''}</div>
         <label class="s-search">${I('search')}<input placeholder="Cari materi, tugas, atau ujian…" oninput="homeSearch(this.value)" id="homeQ"></label>
       </div>
       <div class="s-stats" style="${desk ? 'margin-left:24px;margin-right:24px' : ''}">
@@ -70,6 +70,7 @@ route('s-home', {
       <div id="homeResults"></div>
       <div style="padding:0 16px 8px;${desk ? 'padding:0' : ''}" id="homeMain">
         ${resumeBanner()}
+        ${jadwalStrip('siswa')}
         <div class="sect-title"><h2>Belum Dikerjakan</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-tugas')">Lihat Semua ${I('chev-r', 'ic-sm')}</a></div>
         <div class="grid ${desk ? 'gc2' : ''}">${aktif.map(examCard).join('')}${belum.slice(0, desk ? 6 : 4).map(taskCard).join('')}
           ${!aktif.length && !belum.length ? `<div class="card">${emptyState('check-c', 'Semua tugas sudah selesai', 'Tidak ada tugas atau ujian yang menunggu. Pertahankan!')}</div>` : ''}</div>
