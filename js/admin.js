@@ -33,10 +33,21 @@ function regRow(r) {
     ${r.status === 'MENUNGGU' ? `<div class="flex g8"><button class="btn btn-sm btn-danger-o" onclick="regDecide('${r.daftar_id}',false)">${I('x', 'ic-sm')}Tolak</button><button class="btn btn-sm btn-ok" onclick="regDecide('${r.daftar_id}',true)">${I('check', 'ic-sm')}Setujui</button></div>` : pill(r.status === 'DISETUJUI' ? 'Disetujui' : 'Ditolak', r.status === 'DISETUJUI' ? 'ok' : 'err')}</div>`;
 }
 function regFind(id) { const a = S.c.adash && S.c.adash.d && S.c.adash.d.pending.find((x) => x.daftar_id === id); const u = usersData(); return a || (u && u.pendaftaran.find((x) => x.daftar_id === id)); }
+/** Ubah tulisan kelas jadi bentuk baku: huruf besar, tanpa spasi/tanda, 10/11/12 → X/XI/XII. */
+function normKelas(s) { return String(s || '').trim().toUpperCase().replace(/^(10|11|12)(?=\D|$)/, (m) => ({ 10: 'X', 11: 'XI', 12: 'XII' })[m]).replace(/[^A-Z0-9]/g, ''); }
+/** Tebak kelas dari tulisan bebas ("XI-2", "11 2", "XI-2 MIPA"), aturan sama dengan server. Kembalikan kelas_id bila tepat satu cocok. */
+function kelasGuess(raw) {
+  const ks = B().kelas || [], t = String(raw || '').trim(); if (!t) return '';
+  const n = normKelas(t);
+  let hit = ks.filter((k) => k.kelas_id === t || normKelas(k.nama_kelas) === n);
+  if (!hit.length) hit = ks.filter((k) => normKelas(String(k.nama_kelas).split(/\s+/)[0]) === n);
+  if (!hit.length && /\d/.test(n)) hit = ks.filter((k) => { const m = normKelas(k.nama_kelas); return m.indexOf(n) === 0 && !/\d/.test(m.charAt(n.length)); });
+  return hit.length === 1 ? hit[0].kelas_id : '';
+}
 function regDecide(id, approve, kelasId) {
   const r = regFind(id); if (!r) return;
   if (approve && r.role_diminta !== 'GURU' && !kelasId) {
-    const want = String(r.kelas_diminta || '').toLowerCase().replace(/\s+/g, ''), k = (B().kelas || []).find((x) => String(x.nama_kelas).toLowerCase().replace(/\s+/g, '') === want);
+    const gid = kelasGuess(r.kelas_diminta), k = gid ? (B().kelas || []).find((x) => x.kelas_id === gid) : null;
     if (!k) {
       sheet({ title: 'Pilih kelas untuk ' + esc(r.nama), icon: 'door', body: `<p class="small tx2">Kelas yang diminta: <b>${esc(r.kelas_diminta || '-')}</b> tidak ditemukan. Pilih kelas siswa ini.</p><select class="select mt12" id="regK">${(B().kelas || []).map((x) => `<option value="${x.kelas_id}">${esc(x.nama_kelas)}</option>`).join('')}</select>`,
         foot: `<button class="btn btn-primary" id="regKOk">${I('check')}Setujui</button>`, mount: (el, close) => { $('#regKOk', el).onclick = () => { const v = $('#regK', el).value; close(); regDecide(id, true, v); }; } });
@@ -193,19 +204,26 @@ function showCreds(list, title) {
   foot: `<button class="btn btn-secondary" onclick="copyText(S.c.credTxt)">${I('copy')}Salin</button><button class="btn btn-primary" onclick="exportXlsx('kredensial_akun_${D.ymd(now())}',[{name:'Akun',rows:[['Nama','Kelas','Username','Kata Sandi']].concat(S.c.credList.map(c=>[c.nama,c.kelas,c.username,c.password]))}])">${I('download')}Unduh Excel</button>` });
 }
 function openImportUsers() {
-  const W = { rows: null, res: null };
+  const W = { rows: null, res: null }, kelasList = (B().kelas || []).slice().sort(by('nama_kelas'));
   const s = sheet({ title: 'Import Akun dari Excel', icon: 'upload', size: 'wide', body: `<div id="iuBody"></div>`, foot: `<button class="btn btn-secondary" id="iuTpl">${I('download')}Unduh Template</button><button class="btn btn-primary" id="iuGo" disabled>${I('cloud-ok')}Import</button>`,
     mount: (el) => {
       const draw = () => {
-        const r = W.res;
-        $('#iuBody', el).innerHTML = `<p class="small tx2">Kolom: <span class="mono xs">nama, role, nis_nip, kelas, username, email_google, no_wa</span>. <b>role</b> diisi SISWA/GURU/ADMIN; <b>kelas</b> sesuai nama kelas (mis. XI-2). Username kosong → memakai NIS/NIP.</p>
+        const r = W.res, badK = {};
+        // Kelompokkan baris yang gagal karena nama kelas, supaya penyebabnya terlihat sekali saja
+        if (r) r.errors.forEach((x) => { if (/^Kelas "/.test(x.msg) || /^Kolom kelas kosong/.test(x.msg)) { const k = String((W.rows[x.i] || {}).kelas || '').trim() || '(kosong)'; badK[k] = (badK[k] || 0) + 1; } });
+        const badList = Object.keys(badK);
+        $('#iuBody', el).innerHTML = `<p class="small tx2">Kolom: <span class="mono xs">nama, role, nis_nip, kelas, username, email_google, no_wa</span>. <b>role</b> diisi SISWA/GURU/ADMIN. Username kosong → memakai NIS/NIP.</p>
+          ${kelasList.length ? `<div class="mt12"><div class="small tx2"><b>kelas</b> harus sama dengan nama kelas di Data Akademik. Boleh ditulis singkat (mis. <span class="mono">XI-2</span> atau <span class="mono">11-2</span>) selama hanya cocok dengan satu kelas.</div><div class="chips mt8">${kelasList.map((k) => `<span class="chip">${I('door', 'ic-sm')}${esc(k.nama_kelas)}</span>`).join('')}</div></div>`
+            : `<div class="banner banner-warn mt12">${I('alert')}<div class="f1">Belum ada kelas di Data Akademik. Tambahkan kelas dulu sebelum mengimport akun siswa.</div><button class="btn btn-sm btn-primary" onclick="closeAllSheets();go('a-akademik',{tab:'kelas'})">Tambah kelas</button></div>`}
           <label class="upload mt12">${I('file-text', 'ic-lg')}<div class="bold mt8">${W.file ? esc(W.file) : 'Pilih berkas .xlsx atau .csv'}</div><div class="small muted">Maksimal 1.000 baris per import</div><input type="file" hidden accept=".xlsx,.xls,.csv" id="iuFile"></label>
           ${r ? `<div class="flex g8 mt16 wrap">${pill(r.valid.length + ' siap dibuat', 'ok', 'check')}${r.errors.length ? pill(r.errors.length + ' baris bermasalah (dilewati)', 'err', 'alert') : ''}</div>
-            <div class="tbl-wrap mt12" style="max-height:44vh"><table class="tbl compact"><thead><tr><th>Baris</th><th>Nama</th><th>Peran</th><th>Kelas</th><th>Username</th><th>Status</th></tr></thead><tbody>${r.all.map((x) => x.err ? `<tr class="row-err"><td class="mono">#${x.i + 2}</td><td colspan="4" class="small">${esc((W.rows[x.i] || {}).nama || '-')}</td><td class="small ink-err">${esc(x.err)}</td></tr>` : `<tr><td class="mono">#${x.i + 2}</td><td class="small">${esc(x.nama)}</td><td class="small">${esc(x.role)}</td><td class="small">${esc(kelasNm(x.kelas_id) === '-' ? '' : kelasNm(x.kelas_id))}</td><td class="mono small">${esc(x.username)}</td><td>${pill('Valid', 'ok')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+            ${badList.length ? `<div class="banner banner-warn mt12" style="flex-wrap:wrap">${I('alert')}<div class="f1 small" style="min-width:220px"><b>Nama kelas di berkas belum cocok dengan Data Akademik:</b> ${badList.map((k) => `<span class="mono">${esc(k)}</span> (${badK[k]} baris)`).join(', ')}.<br>Ubah kolom <b>kelas</b> di berkas sesuai daftar kelas di atas, atau tambahkan/ubah nama kelasnya di Data Akademik → Kelas, lalu pilih berkas lagi.</div><button class="btn btn-sm btn-secondary" onclick="closeAllSheets();go('a-akademik',{tab:'kelas'})">${I('door', 'ic-sm')}Data Akademik</button></div>` : ''}
+            <div class="tbl-wrap mt12" style="max-height:44vh"><table class="tbl compact"><thead><tr><th>Baris</th><th>Nama</th><th>Peran</th><th>Kelas</th><th>Username</th><th>Status</th></tr></thead><tbody>${r.all.map((x) => x.err ? `<tr class="row-err"><td class="mono">#${x.i + 2}</td><td colspan="4" class="small">${esc((W.rows[x.i] || {}).nama || '-')}</td><td class="small ink-err">${esc(String(x.err).replace(/ Kelas terdaftar:.*$/, ''))}</td></tr>` : `<tr><td class="mono">#${x.i + 2}</td><td class="small">${esc(x.nama)}</td><td class="small">${esc(x.role)}</td><td class="small">${esc(kelasNm(x.kelas_id) === '-' ? '' : kelasNm(x.kelas_id))}</td><td class="mono small">${esc(x.username)}</td><td>${pill('Valid', 'ok')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
         $('#iuFile', el).onchange = (e) => { const f = e.target.files[0]; if (!f) return; W.file = f.name; readSheetFile(f).then((rows) => { W.rows = rowsToObjs(rows); if (!W.rows.length) throw new Error('Berkas kosong atau header tidak sesuai template.'); return call('users.import', { rows: W.rows, dry: true }); }).then((r2) => { W.res = { valid: r2.valid, errors: r2.errors, all: r2.valid.concat(r2.errors.map((x) => ({ i: x.i, err: x.msg }))).sort(by('i')) }; $('#iuGo', el).disabled = !r2.valid.length; $('#iuGo', el).innerHTML = `${I('cloud-ok')}Buat ${r2.valid.length} Akun`; draw(); }).catch(failToast); };
       };
       draw();
-      $('#iuTpl', el).onclick = () => exportXlsx('template_akun_smapatispa', [{ name: 'Akun', rows: [['nama', 'role', 'nis_nip', 'kelas', 'username', 'email_google', 'no_wa'], ['Rina Lestari', 'SISWA', '222310148', 'XI-2', '', 'rina@gmail.com', '081234567890'], ['Budi Santoso, S.Pd.', 'GURU', '198702122010011003', '', 'budi.santoso', '', '']] }]);
+      $('#iuTpl', el).onclick = () => exportXlsx('template_akun_smapatispa', [{ name: 'Akun', rows: [['nama', 'role', 'nis_nip', 'kelas', 'username', 'email_google', 'no_wa'], ['Rina Lestari', 'SISWA', '222310148', kelasList.length ? kelasList[0].nama_kelas : 'XI-2', '', 'rina@gmail.com', '081234567890'], ['Budi Santoso, S.Pd.', 'GURU', '198702122010011003', '', 'budi.santoso', '', '']] },
+        { name: 'Daftar Kelas', rows: [['nama_kelas (salin persis ke kolom kelas)', 'tingkat']].concat(kelasList.map((k) => [k.nama_kelas, k.tingkat || ''])) }]);
       $('#iuGo', el).onclick = () => {
         const btn = $('#iuGo', el), ok = {}; W.res.valid.forEach((v) => { ok[v.i] = 1; }); btnBusy(btn, true, 'Membuat akun…');
         call('users.import', { rows: W.rows.filter((r, i) => ok[i]) }).then((r) => { s.close(); drop('users'); refreshBoot(true).catch(() => {}); rerender(); toast(r.inserted + ' akun dibuat.', 'ok'); if (r.credentials.length) showCreds(r.credentials, r.inserted + ' Akun Berhasil Dibuat'); }).catch((e) => { btnBusy(btn, false); failToast(e); });
