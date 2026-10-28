@@ -1,4 +1,4 @@
-# Panduan Instalasi SMAPATISPA LEARNING v2.2
+# Panduan Instalasi SMAPATISPA LEARNING v2.3
 **Frontend di GitHub Pages + Google Apps Script sebagai REST API**
 
 ```
@@ -21,6 +21,14 @@ Keuntungan dibanding versi sebelumnya:
 - Layar penuh saat ujian CBT bekerja lebih baik.
 
 Data lama **tetap dipakai**: spreadsheet, akun, tugas, dan ujian tidak berubah.
+
+---
+
+## Pembaruan v2.3 — database Supabase (opsional)
+
+Versi ini menambahkan pilihan menyimpan data di **Supabase (PostgreSQL)** menggantikan Google Sheets. Frontend **tidak berubah** (tidak perlu push ke GitHub/Vercel); hanya backend yang diperbarui: tambah file **Supabase.gs**, ganti **Kode.gs v2.3.0**, lalu deploy versi baru. Tanpa langkah migrasi, aplikasi tetap memakai Google Sheets seperti biasa.
+
+Langkah lengkap (membuat project Supabase, menjalankan `SETUP_SUPABASE.sql`, mengisi Properti skrip, `salinKeSupabase` → `pindahKeSupabase`, dan cara kembali dengan `kembaliKeSheets`) ada di **PANDUAN-MIGRASI-SUPABASE.md**.
 
 ---
 

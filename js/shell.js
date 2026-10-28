@@ -52,6 +52,7 @@ function navConfig() {
 function allNavItems() { const out = []; navConfig().groups.forEach((g) => g.items.forEach((i) => out.push(i))); return out; }
 function renderChrome() {
   const u = me(), c = cfg(), nav = navConfig();
+  const sc = $('#siteCredit'); if (sc) sc.innerHTML = creditHTML();
   const roleLbl = hasRole('SISWA') ? `${kelasNm(u.kelas_id)}` : [hasRole('ADMIN') ? 'Admin' : '', hasRole('GURU') ? 'Guru' : '', hasRole('WALI') ? 'Wali Kelas' : ''].filter(Boolean).join(' · ');
   $('#sidebar').innerHTML = `<div class="brand">${logoHTML()}<div class="f1" style="min-width:0"><div class="nm truncate">${esc(shortName(c.nama_aplikasi))}</div><div class="sub">LMS &amp; CBT</div></div></div>
     <nav class="side-nav">${nav.groups.map((g) => `${g.t ? `<div class="nav-grp">${esc(g.t)}</div>` : '<div style="height:8px"></div>'}${g.items.map((i) => `<button class="nav-a" data-r="${i.r}" data-p='${esc(JSON.stringify(i.p || {}))}' onclick='go("${i.r}", ${JSON.stringify(i.p || {})})'>${I(i.ic)}<span class="truncate">${esc(i.l)}</span>${i.badge ? `<span class="badge ${i.bp ? 'p' : 'p'}">${i.badge}</span>` : i.meta ? `<span class="meta">${esc(i.meta)}</span>` : ''}</button>`).join('')}`).join('')}</nav>
@@ -175,6 +176,9 @@ function markAllRead() {
 // ════════════════════════════════════════════════════════
 // BAGIAN 10: AUTENTIKASI — login, Google, daftar, ganti sandi
 // ════════════════════════════════════════════════════════
+/** Tanda pembuat aplikasi: tampil di layar masuk dan di bawah setiap halaman. */
+const SITE_BY = 'Restu Putra Mulyana';
+function creditHTML() { const c = cfg(); return `© ${new Date().getFullYear()} ${esc(c.nama_sekolah || c.nama_aplikasi || 'SMAPATISPA LEARNING')} · site by <b>${SITE_BY}</b>`; }
 function hideSplash() { const s = $('#splash'); if (s && !s.classList.contains('hide')) { s.classList.add('hide'); setTimeout(() => s.remove(), 400); } }
 function showAuth(html, mount) {
   closeAllSheets();
@@ -187,7 +191,7 @@ function authFrame(inner, heroSub) {
   const c = cfg();
   return `<div class="auth"><div class="auth-hero grad grad-pattern">${logoHTML('lg')}<h1>${esc(c.nama_aplikasi || 'SMAPATISPA LEARNING')}</h1><p>${esc(heroSub || c.nama_sekolah || 'Belajar, tugas, dan ujian dalam satu aplikasi')}</p>
     <div class="only-lg" style="margin-top:20px">${[['clipboard', 'Tugas & pengingat otomatis'], ['exam', 'Ujian CBT dengan pengawasan pelanggaran'], ['chart', 'Nilai, absensi, dan rekap wali kelas']].map((f) => `<div class="feat-li">${I(f[0])}<span>${f[1]}</span></div>`).join('')}</div></div>
-    <div class="auth-side"><div class="card auth-card">${inner}</div></div></div>`;
+    <div class="auth-side"><div class="auth-col"><div class="card auth-card">${inner}</div><p class="site-credit">${creditHTML()}</p></div></div></div>`;
 }
 function showLogin(msg) {
   const c = cfg();
