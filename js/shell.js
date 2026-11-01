@@ -185,13 +185,64 @@ function showAuth(html, mount) {
   $('#shell').hidden = true; $('#exam').hidden = true;
   const a = $('#auth'); a.hidden = false; a.innerHTML = html;
   if (mount) mount(a);
+  authFx(a);
   hideSplash(); window.scrollTo(0, 0);
 }
+/**
+ * Layar masuk interaktif: sapaan & jam berjalan, kartu contoh isi aplikasi (hitung mundur ujian,
+ * tugas, nilai, presensi) yang melayang dan mengikuti arah kursor. Ringan: hanya transform & opacity.
+ */
 function authFrame(inner, heroSub) {
   const c = cfg();
-  return `<div class="auth"><div class="auth-hero grad grad-pattern">${logoHTML('lg')}<h1>${esc(c.nama_aplikasi || 'SMAPATISPA LEARNING')}</h1><p>${esc(heroSub || c.nama_sekolah || 'Belajar, tugas, dan ujian dalam satu aplikasi')}</p>
-    <div class="only-lg" style="margin-top:20px">${[['clipboard', 'Tugas & pengingat otomatis'], ['exam', 'Ujian CBT dengan pengawasan pelanggaran'], ['chart', 'Nilai, absensi, dan rekap wali kelas']].map((f) => `<div class="feat-li">${I(f[0])}<span>${f[1]}</span></div>`).join('')}</div></div>
+  const par = (cls, i, d, html) => `<div class="ah-par ${cls}" style="--i:${i};--d:${d}"><div class="ah-flo"><div class="ah-card">${html}</div></div></div>`;
+  return `<div class="auth auth-x"><div class="auth-hero grad grad-pattern"><span class="ah-glow g1"></span><span class="ah-glow g2"></span>
+      <div class="ah-top">${logoHTML()}<div style="min-width:0"><div class="ah-app truncate">${esc(c.nama_aplikasi || 'SMAPATISPA LEARNING')}</div><div class="ah-sch truncate">${esc(heroSub || c.nama_sekolah || 'Belajar, tugas, dan ujian dalam satu aplikasi')}</div></div></div>
+      <div class="ah-mid">
+        <div class="ah-hi"><h1 class="ah-greet" id="ahGreet">${salam(new Date().getHours())}!</h1>
+          <div class="ah-when"><span id="ahDate">${esc(tglPanjang(new Date()))}</span><span class="ah-time"><i></i><b id="ahTime" class="mono">--.--</b></span></div></div>
+        <div class="ah-stage" aria-hidden="true">
+          ${par('p-timer', 0, 22, `<div class="ah-row"><span class="ah-ic">${I('timer', 'ic-sm')}</span><div class="ah-tt">Ujian Kimia</div></div><div class="ah-big mono" id="ahTimer">00:44:12</div>
+            <div class="lg-only"><div class="ah-meta"><span>Soal 18 dari 40</span><span>Pelanggaran 0/3</span></div><div class="ah-bar"><i></i></div></div>`)}
+          ${par('p-tugas', 1, 14, `<div class="ah-row"><span class="ah-ic warn">${I('clipboard', 'ic-sm')}</span><div class="ah-tt">Tugas Fisika</div></div><div class="ah-sub">Tenggat besok, 23.59</div>
+            <div class="lg-only"><span class="ah-pill warn">Belum dikumpulkan</span></div>`)}
+          ${par('p-nilai lg-only', 2, 30, `<div class="ah-row"><svg class="ah-ring" viewBox="0 0 56 56"><circle cx="28" cy="28" r="22"/><circle class="v" cx="28" cy="28" r="22"/></svg><div style="min-width:0"><div class="ah-tt">Nilai Biologi keluar</div><div class="ah-sub">Ulangan Harian 3</div><div class="ah-score"><b id="ahScore">0</b> <span>/ 100 · Tuntas</span></div></div></div>`)}
+          ${par('p-hadir lg-only', 3, 10, `<div class="ah-row"><span class="ah-ic ok">${I('check-c', 'ic-sm')}</span><div><div class="ah-tt">Hadir</div><div class="ah-sub">Presensi pukul 07.02</div></div></div>`)}
+        </div>
+      </div>
+      <p class="ah-foot">Tugas, ujian CBT, presensi, dan nilai dalam satu tempat.</p></div>
     <div class="auth-side"><div class="auth-col"><div class="card auth-card">${inner}</div><p class="site-credit">${creditHTML()}</p></div></div></div>`;
+}
+function salam(h) { return h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam'; }
+function tglPanjang(d) { try { return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return d.toDateString(); } }
+let AUTHFX = null;
+function authFxStop() { if (AUTHFX) { clearInterval(AUTHFX.t); if (AUTHFX.off) AUTHFX.off(); AUTHFX = null; } }
+function authFx(root) {
+  authFxStop();
+  const wrap = $('.auth-x', root), hero = wrap && $('.auth-hero', wrap); if (!hero) return;
+  const tm = $('#ahTime', hero), dt = $('#ahDate', hero), gr = $('#ahGreet', hero), cd = $('#ahTimer', hero), sc = $('#ahScore', hero), st = $('.ah-stage', hero);
+  const calm = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let left = 44 * 60 + 12;
+  const tick = () => {
+    if (!document.body.contains(hero)) { authFxStop(); return; }   // layar masuk sudah ditutup
+    const d = new Date();
+    tm.innerHTML = pad(d.getHours()) + '<span class="ah-sep">.</span>' + pad(d.getMinutes());
+    if (!d.getSeconds() || !AUTHFX) { gr.textContent = salam(d.getHours()) + '!'; dt.textContent = tglPanjang(d); }
+    left = left > 0 ? left - 1 : 45 * 60;
+    cd.textContent = pad(Math.floor(left / 3600)) + ':' + pad(Math.floor(left % 3600 / 60)) + ':' + pad(left % 60);
+  };
+  tick(); AUTHFX = { t: setInterval(tick, 1000) };
+  // satu momen pembuka: kartu muncul bergantian, cincin nilai terisi sampai 88
+  requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('in')));
+  if (calm) sc.textContent = '88';
+  else { const t0 = performance.now() + 450; const run = (t) => { const k = Math.min(1, Math.max(0, (t - t0) / 1100)); sc.textContent = Math.round(88 * (1 - Math.pow(1 - k, 3))); if (k < 1 && document.body.contains(sc)) requestAnimationFrame(run); }; requestAnimationFrame(run); }
+  // kartu bergeser mengikuti kursor (hanya perangkat dengan mouse)
+  if (!calm && window.matchMedia && matchMedia('(pointer: fine)').matches) {
+    let raf = 0;
+    const mv = (e) => { const r = hero.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; st.style.setProperty('--px', x.toFixed(3)); st.style.setProperty('--py', y.toFixed(3)); }); };
+    const lv = () => { st.style.setProperty('--px', 0); st.style.setProperty('--py', 0); };
+    hero.addEventListener('pointermove', mv); hero.addEventListener('pointerleave', lv);
+    AUTHFX.off = () => { hero.removeEventListener('pointermove', mv); hero.removeEventListener('pointerleave', lv); };
+  }
 }
 function showLogin(msg) {
   const c = cfg();
@@ -199,13 +250,18 @@ function showLogin(msg) {
     ${msg ? `<div class="banner banner-err mt16" id="loginErr">${I('alert-c')}<div>${esc(msg)}</div></div>` : '<div id="loginErr"></div>'}
     <form id="loginForm" class="col g16 mt16" autocomplete="on">
       <div class="field"><label class="label" for="lu">Username / NIS / NIP</label><div class="input-ic">${I('user')}<input class="input" id="lu" name="username" autocomplete="username" required autofocus placeholder="contoh: 222310148" value="${esc(LS.get('sp_lastuser', ''))}"></div></div>
-      <div class="field"><label class="label" for="lp">Kata sandi</label><div class="input-ic">${I('lock')}<input class="input" id="lp" type="password" name="password" autocomplete="current-password" required placeholder="Masukkan kata sandi"><button type="button" class="trail icon-btn" style="width:36px;height:36px" onclick="const i=$('#lp');i.type=i.type==='password'?'text':'password'" aria-label="Lihat kata sandi">${I('eye')}</button></div>
+      <div class="field"><label class="label" for="lp">Kata sandi</label><div class="input-ic">${I('lock')}<input class="input" id="lp" type="password" name="password" autocomplete="current-password" required placeholder="Masukkan kata sandi"><button type="button" class="trail icon-btn" style="width:36px;height:36px" id="lpEye" aria-label="Lihat kata sandi">${I('eye')}</button></div>
+        <div class="help ink-warn bold flex items-c g6" id="capsWarn" hidden>${I('alert', 'ic-sm')}Caps Lock aktif</div>
         <div class="help">Lupa kata sandi? Hubungi Admin atau Wali Kelas.</div></div>
       <button class="btn btn-primary btn-lg btn-block" type="submit" id="loginBtn">${I('arrow-r')}Masuk</button>
     </form>
     ${c.google_login ? `<div class="or">atau</div>
     <button class="btn btn-google btn-lg btn-block" onclick="googleLogin('login')">${I('g')}Masuk dengan Google</button>
     <p class="tc small mt16 muted">Belum punya akun? <a href="javascript:void(0)" onclick="googleLogin('login')" class="bold">Daftar dengan Google</a></p>` : `<p class="tc small mt16 muted">Belum punya akun? Hubungi Admin atau Wali Kelas.</p>`}<p class="tc xs muted mt24">${esc(c.nama_sekolah || '')} · v${esc(c.version || '1.0')}</p>`), (a) => {
+    const lp = $('#lp', a), eye = $('#lpEye', a), caps = $('#capsWarn', a);
+    eye.onclick = () => { const show = lp.type === 'password'; lp.type = show ? 'text' : 'password'; eye.innerHTML = I(show ? 'eye-off' : 'eye'); eye.setAttribute('aria-label', show ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'); lp.focus(); };
+    const capChk = (e) => { if (e.getModifierState) caps.hidden = !e.getModifierState('CapsLock'); };
+    lp.addEventListener('keydown', capChk); lp.addEventListener('keyup', capChk); lp.addEventListener('blur', () => { caps.hidden = true; });
     $('#loginForm', a).onsubmit = (e) => {
       e.preventDefault();
       const f = formData(e.target), btn = $('#loginBtn');
@@ -213,7 +269,10 @@ function showLogin(msg) {
       btnBusy(btn, true, 'Memeriksa…');
       call('auth.login', { username: f.username.trim(), password: f.password, device: navigator.userAgent.slice(0, 140) }, { noAuth: true, retries: 3 })
         .then((r) => { LS.set('sp_lastuser', f.username.trim()); afterLogin(r); })
-        .catch((err) => { btnBusy(btn, false); $('#loginErr').outerHTML = `<div class="banner banner-err mt16" id="loginErr">${I(err.code === 'LOCKED' ? 'lock' : 'alert-c')}<div>${esc(err.message)}</div></div>`; $('#lp').value = ''; $('#lp').focus(); });
+        .catch((err) => {
+          btnBusy(btn, false); $('#loginErr').outerHTML = `<div class="banner banner-err mt16" id="loginErr">${I(err.code === 'LOCKED' ? 'lock' : 'alert-c')}<div>${esc(err.message)}</div></div>`; $('#lp').value = ''; $('#lp').focus();
+          const card = $('.auth-card'); if (card) { card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); }
+        });
     };
   });
 }
@@ -350,7 +409,7 @@ function doLogout() {
   });
 }
 function enterShell(fresh) {
-  $('#auth').hidden = true; $('#auth').innerHTML = '';
+  authFxStop(); $('#auth').hidden = true; $('#auth').innerHTML = '';
   $('#shell').hidden = false;
   renderChrome();
   const last = LS.get('sp_last', null);

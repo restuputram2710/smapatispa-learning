@@ -622,20 +622,42 @@ function openJamEditor() {
 }
 
 // ── Import & ekspor jadwal (Excel) ──
-const JADWAL_COLS = ['kelas', 'hari', 'jam_ke', 'mapel', 'guru', 'ruang', 'kegiatan'];
+// Satu baris = satu blok waktu di satu kelas. Istirahat ditulis sebagai baris kegiatan (Istirahat 1, Istirahat 2, …).
+const JADWAL_COLS = ['kelas', 'hari', 'mulai', 'selesai', 'mapel', 'kegiatan', 'guru'];
+/** Jadwal satu kelas dalam bentuk baris berkas: [kelas, hari, mulai, selesai, mapel, kegiatan, guru, ruang]. */
+function jadwalBarisKelas(rows, cfg, kid) {
+  const out = [], mine = rows.filter((r) => r.k === kid);
+  (cfg.hari || []).slice().sort().forEach((h) => {
+    if (!mine.some((r) => r.h === h)) return;
+    jdDay(mine, cfg, h, { kosong: false }).forEach((b) => {
+      if (!b.ke) { out.push([kelasNm(kid), HARI_N[h], b.mulai, b.selesai, '', b.label, '', '']); return; }
+      b.rows.forEach((r) => out.push([kelasNm(kid), HARI_N[h], b.mulai, b.selesai, r.p ? mapelNm(r.m) : '', r.p ? '' : r.l, r.p ? r.gn || '' : '', r.r || '']));
+    });
+  });
+  return out;
+}
 function jadwalTemplate() {
-  const d = S.c.jdl && S.c.jdl.d, cfg = d ? d.cfg : JD().cfg, kelas = (B().kelas || []).slice().sort(by('nama_kelas'));
+  const d = S.c.jdl && S.c.jdl.d, kelas = (B().kelas || []).slice().sort((a, b) => String(a.nama_kelas).localeCompare(String(b.nama_kelas), 'id', { numeric: true }));
   const k0 = kelas.find((k) => G().penugasan.some((p) => p.kelas_id === k.kelas_id)) || kelas[0] || { nama_kelas: 'XI-1', kelas_id: '' };
-  const pens = G().penugasan.filter((p) => p.kelas_id === k0.kelas_id).slice(0, 3);
-  const ex = [JADWAL_COLS, [k0.nama_kelas, 'Senin', '1', '', '', '', 'Upacara']];
-  pens.forEach((p, i) => ex.push([k0.nama_kelas, 'Senin', i === 0 ? '2-3' : String(i + 3), mapelNm(p.mapel_id), p.guru || '', i === 0 ? 'Lab IPA' : '', '']));
-  if (!pens.length) ex.push([k0.nama_kelas, 'Senin', '2-3', 'Matematika', 'Nama Guru', '', '']);
-  const jam = [['hari', 'jam ke', 'mulai', 'selesai', 'keterangan']];
-  (cfg.hari || []).forEach((h) => jdSlots(cfg, h).forEach((s) => jam.push([HARI_N[h], s.ke, s.mulai, s.selesai, s.label || ''])));
+  let ex = d ? jadwalBarisKelas(d.rows, d.cfg, k0.kelas_id).map((r) => r.slice(0, 7)) : [];
+  if (!ex.length) {   // contoh: hari Senin dengan upacara dan dua kali istirahat
+    const pens = G().penugasan.filter((p) => p.kelas_id === k0.kelas_id), pm = (i) => pens.length ? [mapelNm(pens[i % pens.length].mapel_id), pens[i % pens.length].guru || ''] : [['Matematika', 'Fisika', 'B. Indonesia'][i % 3], 'Nama Guru'];
+    const k = k0.nama_kelas;
+    ex = [[k, 'Senin', '07:00', '07:45', '', 'Upacara', ''], [k, 'Senin', '07:45', '09:15', pm(0)[0], '', pm(0)[1]], [k, 'Senin', '09:15', '09:30', '', 'Istirahat 1', ''],
+      [k, 'Senin', '09:30', '11:00', pm(1)[0], '', pm(1)[1]], [k, 'Senin', '11:00', '11:45', pm(2)[0], '', pm(2)[1]], [k, 'Senin', '11:45', '12:30', '', 'Istirahat 2', ''], [k, 'Senin', '12:30', '14:00', pm(3)[0], '', pm(3)[1]]];
+  }
   exportXlsx('template_jadwal_pelajaran', [
-    { name: 'Jadwal', rows: ex },
-    { name: 'Petunjuk', rows: [['Petunjuk pengisian jadwal pelajaran'], ['Satu baris = satu pelajaran di satu kelas. Kolom: kelas, hari, jam_ke, mapel, guru, ruang, kegiatan.'], ['kelas: nama kelas seperti di Data Akademik (singkatan XI-2 atau 11-2 boleh bila hanya cocok satu kelas). Kelas eskul/pengayaan juga bisa.'], ['hari: Senin, Selasa, Rabu, Kamis, Jumat, Sabtu.'], ['jam_ke: satu jam (3), rentang (1-2), atau daftar (1,3). Harus ada di lembar "Jam Pelajaran".'], ['mapel: nama atau kode mapel. guru: nama, NIP, atau username guru (wajib bila mapel di kelas itu diajar lebih dari satu guru).'], ['Bila guru dan mapel belum punya penugasan di kelas tersebut, penugasan dibuat otomatis saat import.'], ['kegiatan: isi untuk acara non-pelajaran (Upacara, Literasi) dan kosongkan kolom mapel.'], ['Mode "Ganti" menghapus jadwal lama kelas-kelas yang ada di berkas lalu memakai isi berkas. Mode "Tambah" hanya mengganti jam yang tertulis di berkas.']] },
-    { name: 'Jam Pelajaran', rows: jam },
+    { name: 'Jadwal', rows: [JADWAL_COLS].concat(ex) },
+    { name: 'Petunjuk', rows: [['Petunjuk pengisian jadwal pelajaran'],
+      ['Kolom: kelas, hari, mulai, selesai, mapel, kegiatan, guru. Satu baris = satu blok waktu di satu kelas.'],
+      ['kelas: nama kelas seperti di Data Akademik (XI-2 atau 11-2 boleh bila hanya cocok satu kelas). Kelas eskul/pengayaan juga bisa.'],
+      ['hari: Senin, Selasa, Rabu, Kamis, Jumat, Sabtu.'],
+      ['mulai & selesai: jam dengan format 07:00 dan 07:45. Pelajaran dua jam cukup satu baris, misalnya 07:45 sampai 09:15.'],
+      ['mapel & guru: untuk pelajaran. Tulis nama atau kode mapel, dan nama, NIP, atau username guru. Penugasan mengajar yang belum ada dibuat otomatis.'],
+      ['kegiatan: untuk yang bukan pelajaran (Upacara, Literasi, Istirahat 1, Istirahat 2, Sholat Dzuhur). Kosongkan mapel dan guru.'],
+      ['Istirahat: tulis setiap istirahat sebagai baris kegiatan yang namanya mengandung kata "Istirahat". Bila semua kelas istirahat pada jam yang sama, jam itu tampil sebagai istirahat di jadwal semua kelas.'],
+      ['Jam pelajaran di aplikasi disusun otomatis dari jam mulai dan selesai di berkas ini, jadi jam yang berbeda per hari (mis. Jumat lebih pendek) langsung ikut.'],
+      ['Mode "Ganti" mengganti seluruh jadwal kelas yang ada di berkas. Mode "Tambah" hanya mengganti jam yang tertulis di berkas.']] },
     { name: 'Daftar Kelas', rows: [['nama_kelas', 'jenis']].concat(kelas.map((k) => [k.nama_kelas, JENIS_KELAS[k.jenis || 'REGULER']])) },
     { name: 'Daftar Mapel', rows: [['nama_mapel', 'kode']].concat((B().mapel || []).map((m) => [m.nama_mapel, m.kode || ''])) },
     { name: 'Daftar Guru', rows: [['nama', 'nip']].concat((B().gurus || []).map((g) => [g.nama, g.nis_nip || ''])) },
@@ -643,8 +665,9 @@ function jadwalTemplate() {
 }
 function exportJadwal() {
   const d = S.c.jdl && S.c.jdl.d; if (!d) return;
-  const rows = d.rows.slice().sort((a, b) => kelasNm(a.k).localeCompare(kelasNm(b.k)) || a.h - b.h || String(a.j).localeCompare(String(b.j), 'id', { numeric: true }));
-  exportXlsx('jadwal_pelajaran_' + D.ymd(now()), [{ name: 'Jadwal', rows: [JADWAL_COLS].concat(rows.map((r) => [kelasNm(r.k), HARI_N[r.h], r.j, r.p ? mapelNm(r.m) : '', r.gn || '', r.r || '', r.p ? '' : r.l])) }]);
+  const ks = [...new Set(d.rows.map((r) => r.k))].sort((a, b) => kelasNm(a).localeCompare(kelasNm(b), 'id', { numeric: true }));
+  const rows = [].concat(...ks.map((k) => jadwalBarisKelas(d.rows, d.cfg, k))), ruang = rows.some((r) => r[7]);
+  exportXlsx('jadwal_pelajaran_' + D.ymd(now()), [{ name: 'Jadwal', rows: [ruang ? JADWAL_COLS.concat('ruang') : JADWAL_COLS].concat(rows.map((r) => ruang ? r : r.slice(0, 7))) }]);
 }
 function openJadwalImport() {
   const W = { rows: null, res: null, file: '', mode: 'GANTI' };
@@ -652,17 +675,17 @@ function openJadwalImport() {
     mount: (el) => {
       const draw = () => {
         const r = W.res;
-        $('#jiBody', el).innerHTML = `<p class="small tx2">Kolom: <span class="mono xs">${JADWAL_COLS.join(', ')}</span>. Unduh template: isinya contoh dari data sekolah Anda serta daftar kelas, mapel, guru, dan jam pelajaran.</p>
+        $('#jiBody', el).innerHTML = `<p class="small tx2">Kolom: <span class="mono xs">${JADWAL_COLS.join(', ')}</span>. Satu baris = satu blok waktu di satu kelas. Tulis setiap istirahat sebagai baris <b>kegiatan</b> (mis. Istirahat 1, Istirahat 2); jam pelajaran dan istirahat di aplikasi disusun otomatis dari jam di berkas.</p>
           <label class="upload mt12">${I('file-text', 'ic-lg')}<div class="bold mt8">${W.file ? esc(W.file) : 'Pilih berkas .xlsx atau .csv'}</div><div class="small muted">Maksimal 3.000 baris</div><input type="file" hidden accept=".xlsx,.xls,.csv" id="jiFile"></label>
           <div class="field mt16"><label class="label">Cara menyimpan</label><div class="seg">${[['GANTI', 'Ganti jadwal kelas di berkas'], ['TAMBAH', 'Hanya jam yang tertulis']].map((x) => `<button class="${W.mode === x[0] ? 'on' : ''}" data-m="${x[0]}">${x[1]}</button>`).join('')}</div></div>
-          ${r ? `<div class="flex g8 mt16 wrap">${pill(r.jam + ' jam siap', 'ok', 'check')}${pill(r.kelas.length + ' kelas', 'info')}${r.penugasanBaru ? pill(r.penugasanBaru + ' penugasan baru', 'vio', 'plus') : ''}${r.errors.length ? pill(r.errors.length + ' baris bermasalah (dilewati)', 'err', 'alert') : ''}</div>
-            <div class="tbl-wrap mt12" style="max-height:44vh"><table class="tbl compact"><thead><tr><th>Baris</th><th>Kelas</th><th>Hari</th><th>Jam</th><th>Mapel / kegiatan</th><th>Guru</th><th>Status</th></tr></thead><tbody>${r.all.map((x) => x.err ? `<tr class="row-err"><td class="mono">#${x.i + 2}</td><td colspan="5" class="small">${esc([W.rows[x.i].kelas, W.rows[x.i].hari, W.rows[x.i].jam_ke, W.rows[x.i].mapel || W.rows[x.i].kegiatan].filter(Boolean).join(' · '))}</td><td class="small ink-err">${esc(x.err)}</td></tr>`
-              : `<tr><td class="mono">#${x.i + 2}</td><td class="small">${esc(x.kelas)}</td><td class="small">${esc(x.hari)}</td><td class="mono small">${esc(x.jam_ke)}</td><td class="small">${esc(x.mapel || x.kegiatan)}${x.ruang ? ' · ' + esc(x.ruang) : ''}</td><td class="small">${esc(x.guru || '')}</td><td>${x.baru ? pill('Penugasan baru', 'vio') : pill('Valid', 'ok')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+          ${r ? `<div class="flex g8 mt16 wrap">${pill(r.baris !== undefined ? r.baris + ' baris siap' : r.jam + ' jam siap', 'ok', 'check')}${pill(r.kelas.length + ' kelas', 'info')}${r.penugasanBaru ? pill(r.penugasanBaru + ' penugasan baru', 'vio', 'plus') : ''}${r.errors.length ? pill(r.errors.length + ' baris bermasalah (dilewati)', 'err', 'alert') : ''}</div>
+            <div class="tbl-wrap mt12" style="max-height:44vh"><table class="tbl compact"><thead><tr><th>Baris</th><th>Kelas</th><th>Hari</th><th>Jam</th><th>Mapel / kegiatan</th><th>Guru</th><th>Status</th></tr></thead><tbody>${r.all.map((x) => x.err ? `<tr class="row-err"><td class="mono">#${x.i + 2}</td><td colspan="5" class="small">${esc([W.rows[x.i].kelas, W.rows[x.i].hari, W.rows[x.i].mulai ? W.rows[x.i].mulai + '–' + (W.rows[x.i].selesai || '') : W.rows[x.i].jam_ke, W.rows[x.i].mapel || W.rows[x.i].kegiatan].filter(Boolean).join(' · '))}</td><td class="small ink-err">${esc(x.err)}</td></tr>`
+              : `<tr><td class="mono">#${x.i + 2}</td><td class="small">${esc(x.kelas)}</td><td class="small">${esc(x.hari)}</td><td class="mono small">${esc(x.jam || x.jam_ke)}</td><td class="small">${esc(x.mapel || x.kegiatan)}${x.ruang ? ' · ' + esc(x.ruang) : ''}</td><td class="small">${esc(x.guru || '')}</td><td>${x.baru ? pill('Penugasan baru', 'vio') : x.istirahat ? pill('Istirahat', 'info') : pill('Valid', 'ok')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
         $$('[data-m]', el).forEach((b) => { b.onclick = () => { W.mode = b.dataset.m; draw(); }; });
         $('#jiFile', el).onchange = (e) => {
           const f = e.target.files[0]; if (!f) return; W.file = f.name;
           readSheetFile(f).then((rows) => { W.rows = rowsToObjs(rows); if (!W.rows.length) throw new Error('Berkas kosong atau baris pertama bukan nama kolom.'); return call('jadwal.import', { rows: W.rows, dry: true }); })
-            .then((r2) => { W.res = Object.assign(r2, { all: r2.valid.concat(r2.errors.map((x) => ({ i: x.i, err: x.msg }))).sort(by('i')) }); $('#jiGo', el).disabled = !r2.valid.length; $('#jiGo', el).innerHTML = `${I('cloud-ok')}Import ${r2.jam} Jam`; draw(); })
+            .then((r2) => { W.res = Object.assign(r2, { all: r2.valid.concat(r2.errors.map((x) => ({ i: x.i, err: x.msg }))).sort(by('i')) }); $('#jiGo', el).disabled = !r2.valid.length; $('#jiGo', el).innerHTML = `${I('cloud-ok')}Import ${r2.baris !== undefined ? r2.baris + ' Baris' : r2.jam + ' Jam'}`; draw(); })
             .catch(failToast);
         };
       };
@@ -673,7 +696,7 @@ function openJadwalImport() {
         call('jadwal.import', { rows: W.rows.filter((x, i) => okI[i]), mode: W.mode }).then((r) => {
           s.close(); S.c.jdl = { t: Date.now(), d: r.list }; syncJadwalSaya(r.list);
           if (r.penugasanBaru) refreshBoot(true).catch(() => {});
-          rerender(); toast(`${r.inserted} jam pelajaran diimpor untuk ${r.kelas} kelas${r.penugasanBaru ? ', ' + r.penugasanBaru + ' penugasan baru dibuat' : ''}.`, 'ok', 6000);
+          rerender(); toast(`Jadwal ${r.kelas} kelas diimpor (${r.inserted} baris)${r.penugasanBaru ? ', ' + r.penugasanBaru + ' penugasan baru dibuat' : ''}. Jam pelajaran & istirahat disesuaikan dengan berkas.`, 'ok', 7000);
           if (r.bentrok.length) toast(r.bentrok.length + ' jadwal bentrok guru ditemukan. Periksa kotak bertanda merah.', 'warn', 8000);
         }).catch((e) => { btnBusy(btn, false); failToast(e); });
       };
