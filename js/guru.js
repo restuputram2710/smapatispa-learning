@@ -5,11 +5,14 @@
 const jsq = (s) => esc(JSON.stringify(s === undefined ? null : s));
 const penOpts = (sel, filter) => G().penugasan.filter(filter || (() => true)).map((p) => `<option value="${p.penugasan_id}" ${p.penugasan_id === sel ? 'selected' : ''}>${esc(penLabel(p))}${hasRole('ADMIN') && p.guru ? ' — ' + esc(shortGuru(p.guru)) : ''}</option>`).join('');
 function statCard(lbl, val, unit, hint, icon, tone, onclick) {
+  const sv = String(val), num = typeof val === 'number' ? val : /^\d{1,3}(\.\d{3})*$/.test(sv) ? Number(sv.replace(/\./g, '')) : NaN;
+  if (Number.isInteger(num) && num >= 0) val = `<span data-count="${num}">${val}</span>`;
   return `<${onclick ? 'button' : 'div'} class="card stat ${tone ? 'c-' + tone : ''}" ${onclick ? `onclick="${onclick}" style="text-align:left;width:100%"` : ''}><div style="min-width:0"><div class="lbl">${lbl}</div><div class="val">${val}${unit ? `<small>${unit}</small>` : ''}</div>${hint ? `<div class="hint">${hint}</div>` : ''}</div><div class="tile ${tone === 'p' ? '' : tone || ''}">${I(icon)}</div></${onclick ? 'button' : 'div'}>`;
 }
 
 route('g-dash', {
   title: 'Dashboard', roles: ['GURU', 'ADMIN'],
+  mount() { fxMount(); }, leave() { fxStop(); },
   render() {
     const g = G(), st = g.stats, t = now(), u = me();
     const aktifUl = g.ulangan.filter((x) => ulStatus(x).k === 'AKTIF');
@@ -24,18 +27,20 @@ route('g-dash', {
     const agenda = (B().agenda || []).filter((a) => a.selesai >= t).slice(0, 4);
     const kelasChips = uniqBy(g.penugasan.filter((p) => hasRole('ADMIN') ? p.guru_id === u.user_id : true), (p) => p.penugasan_id);
     const c = cfg();
-    return `<div class="page">
-      <div class="page-hd"><div><h1>Selamat Mengajar, ${esc(firstName(u.nama))}</h1><p class="sub">${esc(B().ta ? 'Semester ' + B().ta.semester + ' ' + B().ta.nama : '')} · ${HARI_P[new Date().getDay()]}, ${D.d(now())}</p></div>
-        <div class="flex g8 wrap only-sm"><button class="btn btn-primary" onclick="openCreateMenu(this)">${I('plus')}Buat</button></div></div>
-      <div class="grid gc4">
+    const fx = fxOn();
+    return `<div class="page${fx}">
+      <div class="dash-hero grad grad-pattern fx" style="--i:0"><span class="hero-orb o1"></span><span class="hero-orb o2"></span><span class="hero-orb o3"></span>
+        <div class="dh-in"><div class="f1" style="min-width:0"><div class="dh-greet">${D.greet()} ${I('sparkles', 'ic-sm')}</div><h1>Selamat Mengajar, ${esc(firstName(u.nama))}</h1><p class="sub">${esc(B().ta ? 'Semester ' + B().ta.semester + ' ' + B().ta.nama : '')} · ${HARI_P[new Date().getDay()]}, ${D.d(now())}</p></div>
+          <div class="dh-art" aria-hidden="true"><span class="dh-ring"></span><div class="dh-ic">${I('cap')}</div></div></div>
+        <div class="dh-qa"><button class="qa-w" onclick="go('g-konten',{form:'tugas'})">${I('plus', 'ic-sm')}Buat Tugas</button><button class="qa-w" onclick="go('g-konten',{form:'materi'})">${I('upload', 'ic-sm')}Unggah Materi</button>
+          <button class="qa-w" onclick="go('g-ujian-form',{})">${I('exam', 'ic-sm')}Buat Ujian CBT</button><button class="qa-w" onclick="go('g-absensi')">${I('user-plus', 'ic-sm')}Isi Absensi Hari Ini</button></div>
+      </div>
+      <div class="grid gc4 mt16">
         ${statCard('Kelas Diajar', st.kelas, 'Kelas', kelasChips.map((p) => kelasShort(p.kelas_id)).filter((v, i, a) => a.indexOf(v) === i).join(', '), 'door', 'p')}
         ${statCard('Tugas Perlu Dinilai', st.perluDinilai, 'Pengumpulan', `${I('alert-c', 'ic-sm')}${g.tugas.filter((x) => x.kumpul > x.dinilai && x.tenggat < t).length} tugas lewat tenggat`, 'alert-c', st.perluDinilai ? 'warn' : '', "go('g-konten',{tab:'tugas'})")}
         ${statCard('Ujian Berlangsung', st.ujianAktif, 'Sesi Aktif', aktifUl[0] ? esc(aktifUl[0].judul) : 'Tidak ada sesi', 'timer', st.ujianAktif ? 'ok' : '', "go('g-ujian')")}
         ${statCard('Belum Kumpul', st.belumKumpul, 'Siswa', 'Dari tugas 7 hari terakhir', 'bell', st.belumKumpul ? 'err' : '')}
       </div>
-      <div class="card card-p mt16 flex items-c g12 wrap"><span class="small bold flex items-c g6">${I('sparkles', 'ic-sm ink-p')}Aksi Cepat:</span>
-        <button class="btn btn-sm btn-secondary" onclick="go('g-konten',{form:'tugas'})">${I('plus', 'ic-sm')}Buat Tugas</button><button class="btn btn-sm btn-secondary" onclick="go('g-konten',{form:'materi'})">${I('upload', 'ic-sm')}Unggah Materi</button>
-        <button class="btn btn-sm btn-secondary" onclick="go('g-ujian-form',{})">${I('exam', 'ic-sm')}Buat Ujian CBT</button><button class="btn btn-sm btn-secondary" onclick="go('g-absensi')">${I('user-plus', 'ic-sm')}Isi Absensi Hari Ini</button></div>
       ${jadwalStrip('ajar')}
       <div class="split mt16"><div class="col g16">
         <div class="card"><div class="card-hd"><div><h3>Tugas & Ujian Memerlukan Tindakan</h3><p class="small muted">Pantau status pengerjaan siswa dan beri nilai sebelum tenggat berakhir</p></div>${act.length ? pill(act.length + ' item', 'err') : ''}</div>

@@ -44,6 +44,7 @@ function openAgendaDetail(id) {
 
 route('s-home', {
   title: 'Beranda', roles: ['SISWA'], bare: true,
+  mount() { fxMount(); }, leave() { fxStop(); },
   render() {
     const u = me(), sw = SW(), t = now();
     const belum = sw.tugas.filter((x) => !x.my).sort(by('tenggat'));
@@ -53,36 +54,56 @@ route('s-home', {
     const agenda = (B().agenda || []).filter((a) => a.selesai >= t).slice(0, 8);
     const pendingByMapel = {}; belum.forEach((x) => { pendingByMapel[x.mapel_id] = (pendingByMapel[x.mapel_id] || 0) + 1; });
     const desk = window.innerWidth >= 1024;
-    const ta = B().ta;
-    return `<div class="${desk ? 'page' : ''}" style="${desk ? '' : 'padding:0'}">
-      <div class="s-hero grad grad-pattern" style="${desk ? 'border-radius:24px' : ''}">
+    const ta = B().ta, fx = fxOn();
+    let k = 0; const sec = (html) => html ? `<section class="fx" style="--i:${k++}">${html}</section>` : '';
+    return `<div class="s-home${fx} ${desk ? 'page' : ''}" style="${desk ? '' : 'padding:0'}">
+      <div class="s-hero grad grad-pattern" style="${desk ? 'border-radius:24px' : ''}"><span class="hero-orb o1"></span><span class="hero-orb o2"></span><span class="hero-orb o3"></span>
         <div class="top">${logoHTML('sm')}<b style="font-family:var(--f-head);font-size:16px" class="f1 truncate">${esc(shortName(cfg().nama_aplikasi).split(' ')[0])}</b>
           <button class="round" onclick="openNotif()" aria-label="Notifikasi">${I('bell')}${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ''}</button>
           <button onclick="go('akun')" style="border-radius:50%;border:2px solid rgba(255,255,255,.6)">${avatar(u.nama, u.foto)}</button></div>
-        <div class="greet">${D.greet()},</div><h1>Halo, ${esc(u.nama)}</h1>
+        <div class="hero-in"><div class="greet">${D.greet()},</div><h1>Halo, ${esc(u.nama)} <span class="wave">${I('sparkles')}</span></h1>
         <div class="meta">${I('door', 'ic-sm')}Kelas ${esc(kelasNm(u.kelas_id))}${(u.kelas_x || []).length ? ' · ' + esc(u.kelas_x.map(kelasNm).join(', ')) : ''}${ta ? ' · Semester ' + esc(ta.semester) + ' ' + esc(ta.nama) : ''}</div>
-        <label class="s-search">${I('search')}<input placeholder="Cari materi, tugas, atau ujian…" oninput="homeSearch(this.value)" id="homeQ"></label>
+        <label class="s-search">${I('search')}<input placeholder="Cari materi, tugas, atau ujian…" oninput="homeSearch(this.value)" id="homeQ"></label></div>
       </div>
       <div class="s-stats" style="${desk ? 'margin-left:24px;margin-right:24px' : ''}">
-        <button class="card" onclick="go('s-tugas')" style="text-align:left"><div><div class="small tx2">Tugas Belum</div><div class="flex items-e g6 mt4"><span class="big">${belum.length}</span><span class="small bold ink-err">${belum.length ? 'Perlu Aksi' : 'Aman'}</span></div></div><div class="tile warn">${I('clipboard')}</div></button>
-        <button class="card" onclick="go('s-ujian')" style="text-align:left"><div><div class="small tx2">Ujian Aktif</div><div class="flex items-e g6 mt4"><span class="big ink-p">${aktif.length}</span><span class="small bold ink-p">Tersedia</span></div></div><div class="tile">${I('exam')}</div></button>
+        <button class="card fx tilt" style="--i:0;text-align:left" onclick="go('s-tugas')"><div><div class="small tx2">Tugas Belum</div><div class="flex items-e g6 mt4"><span class="big" data-count="${belum.length}">${belum.length}</span><span class="small bold ink-err">${belum.length ? 'Perlu Aksi' : 'Aman'}</span></div></div><div class="tile warn">${I('clipboard')}</div></button>
+        <button class="card fx tilt" style="--i:1;text-align:left" onclick="go('s-ujian')"><div><div class="small tx2">Ujian Aktif</div><div class="flex items-e g6 mt4"><span class="big ink-p" data-count="${aktif.length}">${aktif.length}</span><span class="small bold ink-p">Tersedia</span></div></div><div class="tile">${I('exam')}</div></button>
       </div>
       <div id="homeResults"></div>
       <div style="padding:0 16px 8px;${desk ? 'padding:0' : ''}" id="homeMain">
         ${resumeBanner()}
-        ${jadwalStrip('siswa')}
-        <div class="sect-title"><h2>Belum Dikerjakan</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-tugas')">Lihat Semua ${I('chev-r', 'ic-sm')}</a></div>
+        ${sec(homeSorotan(sw, belum, aktif, soon, agenda))}
+        ${sec(`<div class="qa-row hscroll">${[['clipboard', 'Tugas', belum.length, "go('s-tugas')", 'q-warn'], ['exam', 'Ujian', aktif.length, "go('s-ujian')", 'q-p'], ['book', 'Mapel', 0, "go('s-mapel')", 'q-vio'], ['star', 'Nilai', 0, "go('s-nilai')", 'q-ok'], ['clock', 'Jadwal', 0, "go('jadwal')", 'q-sky'], ['calendar', 'Agenda', 0, "go('agenda')", 'q-pink']]
+          .map((q) => `<button class="qa ${q[4]}" onclick="${q[3]}"><span class="qa-ic">${I(q[0])}</span><span>${q[1]}</span>${q[2] ? `<b class="qa-n">${q[2]}</b>` : ''}</button>`).join('')}</div>`)}
+        ${sec(jadwalStrip('siswa'))}
+        ${sec(`<div class="sect-title"><h2>Belum Dikerjakan</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-tugas')">Lihat Semua ${I('chev-r', 'ic-sm')}</a></div>
         <div class="grid ${desk ? 'gc2' : ''}">${aktif.map(examCard).join('')}${belum.slice(0, desk ? 6 : 4).map(taskCard).join('')}
-          ${!aktif.length && !belum.length ? `<div class="card">${emptyState('check-c', 'Semua tugas sudah selesai', 'Tidak ada tugas atau ujian yang menunggu. Pertahankan!')}</div>` : ''}</div>
-        ${soon.length ? `<div class="sect-title"><h2>Ujian Akan Datang</h2></div><div class="grid ${desk ? 'gc2' : ''}">${soon.map(examCard).join('')}</div>` : ''}
-        <div class="sect-title"><h2>Mata Pelajaran</h2><span class="ml-a small muted">${esc(kelasNm(u.kelas_id))}</span></div>
-        <div class="mapel-grid">${mapels.map((p) => `<button class="mapel-tile" onclick="go('s-mapel-d',{mapel_id:'${p.mapel_id}'})">${pendingByMapel[p.mapel_id] ? `<span class="badge">${pendingByMapel[p.mapel_id]}</span>` : ''}${mapelIcon(p.mapel_id)}<span class="nm">${esc(mapelNm(p.mapel_id))}</span><span class="gr truncate">${esc(shortGuru(p.guru))}</span></button>`).join('') || `<div class="muted small">Belum ada mapel.</div>`}</div>
-        <div class="sect-title"><h2>Agenda Terdekat</h2><a class="ml-a" href="javascript:void(0)" onclick="go('agenda')">${I('calendar')}</a></div>
-        ${agenda.length ? `<div class="hscroll">${agenda.map((a) => agendaCard(a)).join('')}</div>` : `<div class="card">${emptyState('calendar', 'Belum ada agenda', 'Agenda sekolah untuk kelasmu akan tampil di sini.')}</div>`}
+          ${!aktif.length && !belum.length ? `<div class="card">${emptyState('check-c', 'Semua tugas sudah selesai', 'Tidak ada tugas atau ujian yang menunggu. Pertahankan!')}</div>` : ''}</div>`)}
+        ${soon.length ? sec(`<div class="sect-title"><h2>Ujian Akan Datang</h2></div><div class="grid ${desk ? 'gc2' : ''}">${soon.map(examCard).join('')}</div>`) : ''}
+        ${sec(`<div class="sect-title"><h2>Mata Pelajaran</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-mapel')">${esc(kelasNm(u.kelas_id))} ${I('chev-r', 'ic-sm')}</a></div>
+        <div class="mp-row">${mapels.map((p) => { const n = pendingByMapel[p.mapel_id] || 0, nm = sw.materi.filter((m) => m.mapel_id === p.mapel_id).length;
+          return `<button class="mp-card tilt mp${hashN(p.mapel_id) % 6}" onclick="go('s-mapel-d',{mapel_id:'${p.mapel_id}'})"><span class="mp-blob"></span><span class="mp-ic">${I(mapelBy(p.mapel_id).ikon || 'book')}</span><span class="mp-nm">${esc(mapelNm(p.mapel_id))}</span><span class="mp-gr truncate">${esc(shortGuru(p.guru))}</span><span class="mp-ft"><span class="mp-pill">${n ? n + ' tugas' : nm + ' materi'}</span>${I('arrow-r', 'ic-sm')}</span></button>`; }).join('') || `<div class="muted small">Belum ada mapel.</div>`}</div>`)}
+        ${sec(`<div class="sect-title"><h2>Agenda Terdekat</h2><a class="ml-a" href="javascript:void(0)" onclick="go('agenda')">${I('calendar')}</a></div>
+        ${agenda.length ? `<div class="hscroll">${agenda.map((a) => agendaCard(a)).join('')}</div>` : `<div class="card">${emptyState('calendar', 'Belum ada agenda', 'Agenda sekolah untuk kelasmu akan tampil di sini.')}</div>`}`)}
         <div style="height:24px"></div>
       </div></div>`;
   }
 });
+/** Sorotan beranda siswa: ujian berlangsung, tenggat terdekat, ujian segera, nilai terbaru, agenda — bergeser otomatis. */
+function homeSorotan(sw, belum, aktif, soon, agenda) {
+  const t = now(), out = [];
+  const sl = (tone, ic, over, title, sub, cta, act) => `<div class="hl ${tone}" onclick="${act}" role="button" tabindex="0" onkeydown="if(event.key==='Enter')this.click()"><div class="hl-txt"><span class="hl-over">${over}</span><h3 class="clamp2">${esc(title)}</h3><p class="truncate">${esc(sub)}</p><span class="hl-cta">${cta}${I('arrow-r', 'ic-sm')}</span></div>
+    <div class="hl-art" aria-hidden="true"><span class="hl-c c1"></span><span class="hl-c c2"></span><div class="hl-ic">${I(ic)}</div><span class="hl-sp s1"></span><span class="hl-sp s2"></span><span class="hl-sp s3"></span></div></div>`;
+  aktif.slice(0, 2).forEach((u) => out.push(sl('hl-1', 'exam', 'Ujian berlangsung', u.judul, mapelNm(u.mapel_id) + ' · ditutup ' + D.rel(u.tutup), u.my && u.my.status === 'MENGERJAKAN' ? 'Lanjutkan' : 'Kerjakan', `event.stopPropagation();startExamFlow('${u.ulangan_id}')`)));
+  if (belum[0]) { const x = belum[0]; out.push(sl('hl-3', 'clipboard', t > x.tenggat ? 'Terlambat' : 'Tenggat terdekat', x.judul, mapelNm(x.mapel_id) + ' · ' + D.rel(x.tenggat), 'Kerjakan', `go('s-tugas-d',{id:'${x.tugas_id}'})`)); }
+  if (soon[0]) { const x = soon[0]; out.push(sl('hl-2', 'calendar', 'Ujian segera', x.judul, mapelNm(x.mapel_id) + ' · dibuka ' + D.rel(x.buka), 'Lihat', "go('s-ujian')")); }
+  const dn = sw.tugas.filter((x) => x.my && x.my.nilai !== null && x.my.nilai !== undefined && x.my.nilai !== '').sort(by('tenggat', -1))[0];
+  if (dn) out.push(sl('hl-5', 'star', 'Nilai terbaru', dn.judul, 'Nilai ' + fmtN(dn.my.nilai) + ' · ' + mapelNm(dn.mapel_id), 'Lihat Nilai', "go('s-nilai')"));
+  if (agenda[0]) { const a = agenda[0]; out.push(sl('hl-4', 'megaphone', 'Agenda sekolah', a.judul, D.dt(a.mulai) + (a.lokasi ? ' · ' + a.lokasi : ''), 'Detail', `openAgendaDetail('${a.agenda_id}')`)); }
+  if (!aktif.length && !belum.length) out.unshift(sl('hl-5', 'sparkles', 'Semangat belajar', 'Semua tugas sudah beres!', 'Cek materi terbaru dari gurumu.', 'Lihat Mapel', "go('s-mapel')"));
+  const sls = out.slice(0, 5);
+  return `<div class="carousel" data-key="s-home"><div class="car-track">${sls.join('')}</div>${sls.length > 1 ? `<div class="car-dots" role="tablist">${sls.map((x, i) => `<button type="button" aria-label="Sorotan ${i + 1}"><i></i></button>`).join('')}</div>` : ''}</div>`;
+}
 const shortGuru = (n) => String(n || '').replace(/^(Drs?\.?|Dr\.?|H\.)\s{0,}/g, '').replace(/,.*$/, '').split(' ').slice(0, 2).join(' ');
 function uniqPen(pens) { const s = {}; return (pens || []).filter((p) => { if (s[p.mapel_id]) return false; s[p.mapel_id] = 1; return true; }); }
 function homeSearch(q) {

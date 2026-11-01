@@ -189,17 +189,32 @@ function showAuth(html, mount) {
   hideSplash(); window.scrollTo(0, 0);
 }
 /**
- * Layar masuk interaktif: sapaan & jam berjalan, kartu contoh isi aplikasi (hitung mundur ujian,
- * tugas, nilai, presensi) yang melayang dan mengikuti arah kursor. Ringan: hanya transform & opacity.
+ * Layar masuk imersif: latar biru penuh dengan "rak buku" mapel yang bergerak pelan, logo berdenyut,
+ * slide sambutan otomatis (bisa digeser), sapaan & jam berjalan, dan kartu contoh isi aplikasi yang
+ * melayang mengikuti kursor. Ringan: hanya transform & opacity, berhenti saat layar masuk ditutup.
  */
+const AUTH_SLIDES = [
+  ['sparkles', 'Selamat datang!', 'Belajar, tugas, dan ujian sekolah kini dalam satu aplikasi.', 'p-tugas'],
+  ['shield', 'Ujian CBT yang aman', 'Token ujian, soal acak, dan pengawasan pelanggaran otomatis.', 'p-timer'],
+  ['chart', 'Pantau perkembanganmu', 'Nilai, presensi, dan jadwal pelajaran selalu terbaru.', 'p-nilai']];
+const AUTH_COVERS = [['Matematika', 'calc'], ['Fisika', 'atom'], ['Biologi', 'leaf'], ['Kimia', 'flask'], ['B. Indonesia', 'book'], ['B. Inggris', 'languages'], ['Sejarah', 'landmark'],
+  ['Informatika', 'terminal'], ['Geografi', 'compass'], ['Ekonomi', 'chart'], ['Seni Budaya', 'palette'], ['PJOK', 'dumbbell'], ['Sosiologi', 'users'], ['Seni Musik', 'music'], ['Bahasa Jawa', 'message']];
+function authMosaic() {
+  const col = (k) => { let h = ''; for (let j = 0; j < 5; j++) { const cv = AUTH_COVERS[(k * 5 + j * 2) % AUTH_COVERS.length]; h += `<div class="cv cv${(k + j) % 5}"><span class="cv-ic">${I(cv[1])}</span><b>${cv[0]}</b><i></i><i></i></div>`; } return h + h; };
+  let out = ''; for (let k = 0; k < 6; k++) out += `<div class="mz-col" style="--k:${k}">${col(k)}</div>`;
+  return `<div class="auth-bg" aria-hidden="true"><div class="mosaic">${out}</div><span class="ah-glow g1"></span><span class="ah-glow g2"></span></div>`;
+}
 function authFrame(inner, heroSub) {
   const c = cfg();
   const par = (cls, i, d, html) => `<div class="ah-par ${cls}" style="--i:${i};--d:${d}"><div class="ah-flo"><div class="ah-card">${html}</div></div></div>`;
-  return `<div class="auth auth-x"><div class="auth-hero grad grad-pattern"><span class="ah-glow g1"></span><span class="ah-glow g2"></span>
-      <div class="ah-top">${logoHTML()}<div style="min-width:0"><div class="ah-app truncate">${esc(c.nama_aplikasi || 'SMAPATISPA LEARNING')}</div><div class="ah-sch truncate">${esc(heroSub || c.nama_sekolah || 'Belajar, tugas, dan ujian dalam satu aplikasi')}</div></div></div>
+  return `<div class="auth auth-x">${authMosaic()}<div class="auth-hero">
+      <div class="ah-top">${logoHTML()}<div style="min-width:0"><div class="ah-app truncate">${esc(c.nama_aplikasi || 'SMAPATISPA LEARNING')}</div><div class="ah-sch truncate">${esc(heroSub || c.nama_sekolah || 'Belajar, tugas, dan ujian dalam satu aplikasi')}</div></div>
+        <span class="ah-time"><i></i><b id="ahTime" class="mono">--.--</b></span></div>
       <div class="ah-mid">
-        <div class="ah-hi"><h1 class="ah-greet" id="ahGreet">${salam(new Date().getHours())}!</h1>
-          <div class="ah-when"><span id="ahDate">${esc(tglPanjang(new Date()))}</span><span class="ah-time"><i></i><b id="ahTime" class="mono">--.--</b></span></div></div>
+        <div class="ah-badge">${logoHTML()}<span class="rp r1"></span><span class="rp r2"></span></div>
+        <div class="ah-hi"><span id="ahGreet">${salam(new Date().getHours())}</span> · <span id="ahDate">${esc(tglPanjang(new Date()))}</span></div>
+        <div class="ah-slides" id="ahSlides" aria-live="polite">${AUTH_SLIDES.map((x, i) => `<div class="ah-slide ${i ? '' : 'on'}"><span class="ah-sic">${I(x[0], 'ic-sm')}</span><h1>${esc(i ? x[1] : x[1].replace('!', '') + ' di ' + (c.nama_aplikasi || 'SMAPATISPA LEARNING'))}</h1><p>${esc(x[2])}</p></div>`).join('')}</div>
+        <div class="ah-dots" role="tablist">${AUTH_SLIDES.map((x, i) => `<button type="button" class="${i ? '' : 'on'}" data-s="${i}" aria-label="${esc(x[1])}"><i></i></button>`).join('')}</div>
         <div class="ah-stage" aria-hidden="true">
           ${par('p-timer', 0, 22, `<div class="ah-row"><span class="ah-ic">${I('timer', 'ic-sm')}</span><div class="ah-tt">Ujian Kimia</div></div><div class="ah-big mono" id="ahTimer">00:44:12</div>
             <div class="lg-only"><div class="ah-meta"><span>Soal 18 dari 40</span><span>Pelanggaran 0/3</span></div><div class="ah-bar"><i></i></div></div>`)}
@@ -220,28 +235,42 @@ function authFx(root) {
   authFxStop();
   const wrap = $('.auth-x', root), hero = wrap && $('.auth-hero', wrap); if (!hero) return;
   const tm = $('#ahTime', hero), dt = $('#ahDate', hero), gr = $('#ahGreet', hero), cd = $('#ahTimer', hero), sc = $('#ahScore', hero), st = $('.ah-stage', hero);
+  const slides = $$('.ah-slide', hero), dots = $$('.ah-dots button', hero), cards = $$('.ah-par', hero);
   const calm = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-  let left = 44 * 60 + 12;
+  let left = 44 * 60 + 12, si = 0, sAt = Date.now(), hold = false;
+  const showSlide = (k) => {
+    si = (k + slides.length) % slides.length; sAt = Date.now();
+    slides.forEach((x, j) => x.classList.toggle('on', j === si)); dots.forEach((x, j) => { x.classList.toggle('on', j === si); x.setAttribute('aria-selected', j === si); });
+    const hot = AUTH_SLIDES[si][3]; cards.forEach((x) => x.classList.toggle('hot', x.classList.contains(hot) || (hot === 'p-nilai' && x.classList.contains('p-hadir'))));
+  };
   const tick = () => {
     if (!document.body.contains(hero)) { authFxStop(); return; }   // layar masuk sudah ditutup
     const d = new Date();
     tm.innerHTML = pad(d.getHours()) + '<span class="ah-sep">.</span>' + pad(d.getMinutes());
-    if (!d.getSeconds() || !AUTHFX) { gr.textContent = salam(d.getHours()) + '!'; dt.textContent = tglPanjang(d); }
+    if (!d.getSeconds() || !AUTHFX) { gr.textContent = salam(d.getHours()); dt.textContent = tglPanjang(d); }
     left = left > 0 ? left - 1 : 45 * 60;
     cd.textContent = pad(Math.floor(left / 3600)) + ':' + pad(Math.floor(left % 3600 / 60)) + ':' + pad(left % 60);
+    if (!calm && !hold && !document.hidden && Date.now() - sAt >= 4800) showSlide(si + 1);   // slide sambutan berganti otomatis
   };
   tick(); AUTHFX = { t: setInterval(tick, 1000) };
-  // satu momen pembuka: kartu muncul bergantian, cincin nilai terisi sampai 88
+  showSlide(0);
+  dots.forEach((b) => { b.onclick = () => showSlide(+b.dataset.s); });
+  // geser kiri/kanan pada teks sambutan (HP)
+  const sl = $('#ahSlides', hero); let x0 = null;
+  sl.addEventListener('pointerdown', (e) => { x0 = e.clientX; hold = true; });
+  sl.addEventListener('pointerup', (e) => { if (x0 !== null && Math.abs(e.clientX - x0) > 36) showSlide(si + (e.clientX < x0 ? 1 : -1)); x0 = null; hold = false; sAt = Date.now(); });
+  sl.addEventListener('pointercancel', () => { x0 = null; hold = false; });
+  // satu momen pembuka: logo, teks, kartu, dan formulir muncul bergantian; cincin nilai terisi sampai 88
   requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('in')));
   if (calm) sc.textContent = '88';
-  else { const t0 = performance.now() + 450; const run = (t) => { const k = Math.min(1, Math.max(0, (t - t0) / 1100)); sc.textContent = Math.round(88 * (1 - Math.pow(1 - k, 3))); if (k < 1 && document.body.contains(sc)) requestAnimationFrame(run); }; requestAnimationFrame(run); }
-  // kartu bergeser mengikuti kursor (hanya perangkat dengan mouse)
+  else { const t0 = performance.now() + 650; const run = (t) => { const k = Math.min(1, Math.max(0, (t - t0) / 1100)); sc.textContent = Math.round(88 * (1 - Math.pow(1 - k, 3))); if (k < 1 && document.body.contains(sc)) requestAnimationFrame(run); }; requestAnimationFrame(run); }
+  // kartu & rak buku bergeser mengikuti kursor (hanya perangkat dengan mouse)
   if (!calm && window.matchMedia && matchMedia('(pointer: fine)').matches) {
-    let raf = 0;
-    const mv = (e) => { const r = hero.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; st.style.setProperty('--px', x.toFixed(3)); st.style.setProperty('--py', y.toFixed(3)); }); };
+    let raf = 0; const mz = $('.mosaic', wrap);
+    const mv = (e) => { const x = e.clientX / innerWidth - 0.5, y = e.clientY / innerHeight - 0.5; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; st.style.setProperty('--px', x.toFixed(3)); st.style.setProperty('--py', y.toFixed(3)); if (mz) { mz.style.setProperty('--px', x.toFixed(3)); mz.style.setProperty('--py', y.toFixed(3)); } }); };
     const lv = () => { st.style.setProperty('--px', 0); st.style.setProperty('--py', 0); };
-    hero.addEventListener('pointermove', mv); hero.addEventListener('pointerleave', lv);
-    AUTHFX.off = () => { hero.removeEventListener('pointermove', mv); hero.removeEventListener('pointerleave', lv); };
+    wrap.addEventListener('pointermove', mv); wrap.addEventListener('pointerleave', lv);
+    AUTHFX.off = () => { wrap.removeEventListener('pointermove', mv); wrap.removeEventListener('pointerleave', lv); };
   }
 }
 function showLogin(msg) {
@@ -477,4 +506,51 @@ window.addEventListener('online', () => { toast('Koneksi kembali tersambung.', '
 window.addEventListener('offline', () => toast('Koneksi terputus. Perubahan akan dikirim saat tersambung.', 'warn'));
 window.addEventListener('resize', debounce(() => { if (!$('#shell').hidden) { renderTopbar(); } }, 200));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if ($('#menuPop')) closeMenus(); else if (SHEETS.length && !(SHEETS[SHEETS.length - 1].o.locked)) closeSheet(); } });
+
+// ════════════════════════════════════════════════════════
+// ANIMASI & INTERAKSI DASHBOARD — ringan (transform/opacity), menghormati "kurangi gerakan"
+// ════════════════════════════════════════════════════════
+const FX = { t: [], idx: {} };
+const fxCalm = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+/** Kelas animasi masuk: hanya pada render pertama setelah pindah halaman (bukan saat data disegarkan). */
+function fxOn() { if (S.fxRk === S.rk) return ''; S.fxRk = S.rk; return ' fx-anim'; }
+function fxStop() { FX.t.forEach((x) => clearInterval(x)); FX.t = []; }
+/** Angka bergerak naik dari 0 (hanya integer). */
+function countUp(el, i) {
+  const to = Number(el.dataset.count); if (!isFinite(to) || to <= 0 || to > 1e7) return;
+  const t0 = performance.now() + 160 + (i || 0) * 70, dur = 900;
+  el.textContent = fmtN(0, 0);
+  const run = (t) => { const k = Math.min(1, Math.max(0, (t - t0) / dur)); el.textContent = fmtN(Math.round(to * (1 - Math.pow(1 - k, 3))), 0); if (k < 1 && document.body.contains(el)) requestAnimationFrame(run); };
+  requestAnimationFrame(run);
+}
+/** Carousel geser (scroll-snap) + titik + putar otomatis 5 detik; berhenti saat disentuh/ditunjuk. */
+function carousel(box) {
+  const tr = $('.car-track', box), dots = $$('.car-dots button', box), n = tr ? tr.children.length : 0, key = box.dataset.key || '';
+  if (n < 2) return;
+  let i = Math.min(FX.idx[key] || 0, n - 1), hold = 0, st = 0;
+  const step = () => tr.children[1].offsetLeft - tr.children[0].offsetLeft || tr.clientWidth;
+  const mark = () => { FX.idx[key] = i; dots.forEach((d, k) => { d.classList.toggle('on', k === i); d.setAttribute('aria-selected', k === i); }); };
+  const goI = (k, smooth) => { i = (k + n) % n; tr.scrollTo({ left: i * step(), behavior: smooth === false || fxCalm() ? 'auto' : 'smooth' }); mark(); };
+  dots.forEach((d, k) => { d.onclick = (e) => { e.stopPropagation(); goI(k); }; });
+  tr.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(() => { const k = Math.round(tr.scrollLeft / step()); if (k !== i && k >= 0 && k < n) { i = k; mark(); } }, 90); }, { passive: true });
+  const on = () => { hold = Date.now(); };
+  ['pointerdown', 'touchstart', 'wheel', 'focusin', 'mouseenter'].forEach((ev) => box.addEventListener(ev, on, { passive: true }));
+  box.addEventListener('mouseleave', () => { hold = Date.now() - 4000; });
+  if (i) goI(i, false); else mark();
+  if (!fxCalm()) FX.t.push(setInterval(() => { if (document.hidden || !document.body.contains(box) || Date.now() - hold < 7000) return; goI(i + 1); }, 5000));
+}
+/** Dipanggil route.mount halaman dashboard. */
+function fxMount() {
+  fxStop();
+  const root = $('#app-container'), anim = !!$('.fx-anim', root);
+  if (anim && !fxCalm()) $$('[data-count]', root).forEach(countUp);
+  $$('.carousel', root).forEach(carousel);
+}
+/** Kartu bergerak sedikit mengikuti kursor (efek 3D halus) — hanya perangkat dengan mouse. */
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse' || fxCalm()) return;
+  const c = e.target.closest && e.target.closest('.tilt'); if (!c) return;
+  const r = c.getBoundingClientRect(); c.style.setProperty('--rx', ((e.clientY - r.top) / r.height - 0.5).toFixed(3)); c.style.setProperty('--ry', ((e.clientX - r.left) / r.width - 0.5).toFixed(3));
+}, { passive: true });
+document.addEventListener('pointerout', (e) => { const c = e.target.closest && e.target.closest('.tilt'); if (c && !c.contains(e.relatedTarget)) { c.style.setProperty('--rx', 0); c.style.setProperty('--ry', 0); } }, { passive: true });
 (window.__SP_F__ = window.__SP_F__ || {}).shell = 1;

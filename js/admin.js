@@ -8,12 +8,18 @@ const usersData = () => S.c.users && S.c.users.d;
 
 route('a-dash', {
   title: 'Dashboard Admin', roles: ['ADMIN'],
+  mount() { fxMount(); }, leave() { fxStop(); },
   render() {
     const d = need('adash', 'admin.dash', {}, 60000), c = cfg(), s = (B().admin || {}).settings || {};
     if (!d) return skelPage();
     const st = d.stats, q = d.quota, active = d.login.length ? d.login[d.login.length - 1].n : 0;
-    return `<div class="page"><div class="page-hd"><div><h1>Dashboard Admin</h1><p class="sub">${esc(c.nama_sekolah || '')}${B().ta ? ' · Tahun Ajaran ' + esc(B().ta.nama) + ' Semester ' + esc(B().ta.semester) : ' · Tahun ajaran belum diatur'}</p></div>
-        <div class="flex g8 wrap"><button class="btn btn-secondary" onclick="go('a-settings')">${I('sliders')}Pengaturan</button><button class="btn btn-primary" onclick="go('a-users');setTimeout(()=>openUserForm(null),40)">${I('user-plus')}Tambah Pengguna</button></div></div>
+    const fx = fxOn();
+    return `<div class="page${fx}"><div class="dash-hero grad grad-pattern fx mb16" style="--i:0"><span class="hero-orb o1"></span><span class="hero-orb o2"></span><span class="hero-orb o3"></span>
+        <div class="dh-in"><div class="f1" style="min-width:0"><div class="dh-greet">${D.greet()}, ${esc(firstName(me().nama))} ${I('sparkles', 'ic-sm')}</div><h1>Dashboard Admin</h1><p class="sub">${esc(c.nama_sekolah || '')}${B().ta ? ' · Tahun Ajaran ' + esc(B().ta.nama) + ' Semester ' + esc(B().ta.semester) : ' · Tahun ajaran belum diatur'}</p>
+          <div class="dh-pills"><span class="dh-pill"><i class="live"></i><span data-count="${active}">${active}</span> pengguna aktif hari ini</span>${st.pending ? `<span class="dh-pill warn">${I('user-plus', 'ic-sm')}${st.pending} pendaftar menunggu</span>` : ''}</div></div>
+          <div class="dh-art" aria-hidden="true"><span class="dh-ring"></span><div class="dh-ic">${I('shield')}</div></div></div>
+        <div class="dh-qa"><button class="qa-w" onclick="go('a-settings')">${I('sliders', 'ic-sm')}Pengaturan</button><button class="qa-w solid" onclick="go('a-users');setTimeout(()=>openUserForm(null),40)">${I('user-plus', 'ic-sm')}Tambah Pengguna</button>
+          <button class="qa-w" onclick="go('a-akademik')">${I('book', 'ic-sm')}Data Akademik</button><button class="qa-w" onclick="go('laporan')">${I('chart', 'ic-sm')}Laporan</button></div></div>
       ${!B().ta ? `<div class="banner banner-warn mb16">${I('alert')}<div class="f1">Tahun ajaran aktif belum diatur. Atur di Data Akademik agar kelas dan penugasan tercatat per semester.</div><button class="btn btn-sm btn-primary" onclick="go('a-akademik',{tab:'ta'})">Atur</button></div>` : ''}
       ${d.demo ? `<div class="banner banner-info mb16" style="flex-wrap:wrap">${I('sparkles')}<div class="f1 small" style="min-width:220px"><b>Data contoh dari pemasangan awal masih ada:</b> ${d.demo} akun contoh beserta tugas, ujian, presensi, dan agendanya. Hapus setelah selesai mencoba aplikasi.</div><button class="btn btn-sm btn-primary" onclick="openDemoCleanup()">${I('trash', 'ic-sm')}Tinjau & Hapus</button></div>` : ''}
       <div class="grid gc5">${statCard('Siswa aktif', fmtN(st.siswa, 0), 'siswa', '', 'users', 'p', "go('a-users',{tab:'siswa'})")}${statCard('Guru aktif', fmtN(st.guru, 0), 'guru', '', 'user', '', "go('a-users',{tab:'guru'})")}${statCard('Rombel', st.kelas, 'kelas', '', 'door', '', "go('a-akademik',{tab:'kelas'})")}${statCard('Pendaftaran', st.pending, 'menunggu', st.pending ? 'Perlu persetujuan' : 'Tidak ada antrean', 'user-plus', st.pending ? 'warn' : '', "go('a-users',{tab:'daftar'})")}${statCard('Ujian 7 hari', st.ujianMinggu, 'sesi', 'Terbit & terjadwal', 'exam', st.ujianMinggu ? 'ok' : '', "go('g-ujian')")}</div>
