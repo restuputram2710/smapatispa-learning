@@ -82,7 +82,7 @@ route('s-home', {
         ${soon.length ? sec(`<div class="sect-title"><h2>Ujian Akan Datang</h2></div><div class="grid ${desk ? 'gc2' : ''}">${soon.map(examCard).join('')}</div>`) : ''}
         ${sec(`<div class="sect-title"><h2>Mata Pelajaran</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-mapel')">${esc(kelasNm(u.kelas_id))} ${I('chev-r', 'ic-sm')}</a></div>
         <div class="mp-row">${mapels.map((p) => { const n = pendingByMapel[p.mapel_id] || 0, nm = sw.materi.filter((m) => m.mapel_id === p.mapel_id).length;
-          return `<button class="mp-card tilt mp${hashN(p.mapel_id) % 6}" onclick="go('s-mapel-d',{mapel_id:'${p.mapel_id}'})"><span class="mp-blob"></span><span class="mp-ic">${I(mapelBy(p.mapel_id).ikon || 'book')}</span><span class="mp-nm">${esc(mapelNm(p.mapel_id))}</span><span class="mp-gr truncate">${esc(shortGuru(p.guru))}</span><span class="mp-ft"><span class="mp-pill">${n ? n + ' tugas' : nm + ' materi'}</span>${I('arrow-r', 'ic-sm')}</span></button>`; }).join('') || `<div class="muted small">Belum ada mapel.</div>`}</div>`)}
+          return `<button class="mp-card tilt mp${hashN(p.mapel_id) % 6}" onclick="go('s-mapel-d',{mapel_id:'${p.mapel_id}'})"><span class="mp-blob"></span><span class="mp-ic">${I(mapelBy(p.mapel_id).ikon || 'book')}</span><span class="mp-nm">${esc(mapelNm(p.mapel_id))}</span><span class="mp-gr">${esc(p.guru || '-')}</span><span class="mp-ft"><span class="mp-pill">${n ? n + ' tugas' : nm + ' materi'}</span>${I('arrow-r', 'ic-sm')}</span></button>`; }).join('') || `<div class="muted small">Belum ada mapel.</div>`}</div>`)}
         ${sec(`<div class="sect-title"><h2>Agenda Terdekat</h2><a class="ml-a" href="javascript:void(0)" onclick="go('agenda')">${I('calendar')}</a></div>
         ${agenda.length ? `<div class="hscroll">${agenda.map((a) => agendaCard(a)).join('')}</div>` : `<div class="card">${emptyState('calendar', 'Belum ada agenda', 'Agenda sekolah untuk kelasmu akan tampil di sini.')}</div>`}`)}
         <div style="height:24px"></div>
@@ -337,7 +337,8 @@ function enterExam(d, u) {
     active: true, att: d.attempt, qs: d.questions, ul: d.ulangan, u, idx: local ? clamp(local.idx || 0, 0, d.questions.length - 1) : 0,
     a: Object.assign({}, d.attempt.answers || {}, (local && local.a) || {}), rg: new Set((local && local.rg) || d.attempt.ragu || []),
     v: Math.max(d.attempt.violations || 0, (local && local.v) || 0), limit: d.attempt.limit || 3, off: d.serverNow - Date.now(), batas: d.attempt.batas,
-    dirty: !!local, lastSync: Date.now(), lastViol: 0, syncing: false, timers: [], status: d.attempt.status, startedAt: Date.now(), navOpen: false
+    dirty: !!local, lastSync: Date.now(), lastViol: 0, syncing: false, timers: [], status: d.attempt.status, startedAt: Date.now(), navOpen: false,
+    tol: Math.max(0, Number(d.ulangan.tol) || 0)
   };
   LS.set('sp_ex_active', { u: me().user_id, ulangan_id: X.ul.ulangan_id, attempt_id: X.att.id });
   u.my = Object.assign(u.my || {}, { status: 'MENGERJAKAN' });
@@ -349,76 +350,174 @@ function enterExam(d, u) {
   document.addEventListener('fullscreenchange', onExFS);
   document.addEventListener('webkitfullscreenchange', onExFS);
   ex.addEventListener('copy', blockEv); ex.addEventListener('contextmenu', blockEv); ex.addEventListener('cut', blockEv);
+  document.addEventListener('keydown', exKeyDown); window.addEventListener('pagehide', saveExLocal);
   X.timers.push(setInterval(tickExam, 1000));
   scheduleSync();
   window.onbeforeunload = () => { if (X && X.active) { saveExLocal(); return 'Ujian sedang berlangsung.'; } };
 }
 const blockEv = (e) => { if (!(e.target && /TEXTAREA|INPUT/.test(e.target.tagName))) e.preventDefault(); };
-function saveExLocal() { if (!X) return; LS.set(exKey(X.att.id), { a: X.a, rg: Array.from(X.rg), idx: X.idx, v: X.v, t: Date.now() }); }
+function saveExLocal() { if (!X) return; clearTimeout(X.saveT); X.saveT = 0; LS.set(exKey(X.att.id), { a: X.a, rg: Array.from(X.rg), idx: X.idx, v: X.v, t: Date.now() }); }
+/** Simpan ke perangkat sesaat setelah layar diperbarui (ketukan terasa instan, tetap aman tersimpan). */
+function queueSave() { if (X && !X.saveT) X.saveT = setTimeout(saveExLocal, 40); }
 function exRemaining() { return X.batas - (Date.now() + X.off); }
-function answeredCount() { return X.qs.filter((q) => isAnswered(q)).length; }
+function answeredCount() { let n = 0; for (let i = 0; i < X.qs.length; i++) if (isAnswered(X.qs[i])) n++; return n; }
 function isAnswered(q) { const v = X.a[q.id]; if (v === undefined || v === null || v === '') return false; if (Array.isArray(v)) return v.filter((x) => x !== null && x !== '').length > 0; return true; }
-function renderExam() {
-  const q = X.qs[X.idx], n = X.qs.length, rem = exRemaining();
-  const off = !navigator.onLine;
-  $('#exam').innerHTML = `${off ? `<div class="offline-bar">${I('wifi-off', 'ic-sm')}Sinyal terputus — jawaban aman tersimpan di perangkat</div>` : ''}
-    <div class="ex-top"><div class="flex items-s jc-b g12" style="max-width:1240px;margin:0 auto"><div class="f1" style="min-width:0"><div class="lbl">CBT ${esc(shortName(cfg().nama_aplikasi).split(' ')[0])}</div><h2 class="truncate">${esc(X.ul.judul)}</h2><div class="small muted">${esc(mapelNm(X.ul.mapel_id))} · ${n} Soal</div></div>
-      <div class="col items-e g6"><div class="timer ${rem < 300000 ? 'err' : rem < 600000 ? 'warn' : ''}" id="exTimer">${I('clock')}<span>${D.clock(rem)}</span></div><span class="viol-pill ${X.v ? 'on' : ''}" id="exViol">${I('alert', 'ic-sm')}Pelanggaran ${X.v}/${X.limit}</span></div></div>
-      <div class="ex-sub" style="max-width:1240px;margin:10px auto 0"><span class="sync-dot ${X.syncing ? 'busy' : off ? 'off' : ''}" id="exSync">${X.dirty ? 'Tersimpan di perangkat' : 'Tersimpan otomatis · ' + D.t(X.lastSync) + ' ' + TZL}</span><span class="mono xs muted">NIS: ${esc(me().nis_nip || '')}</span></div></div>
-    <div class="ex-body"><div>
-      <div class="q-card"><div class="flex items-c g12 wrap jc-b"><span class="q-no">SOAL ${q.no} DARI ${n}</span><span class="small tx2">${TIPE_SOAL[q.tipe]}</span><span class="pill pill-info">Bobot: ${fmtN(q.bobot)} poin</span></div>
+/** Toleransi selesai: tombol Selesai aktif mulai X menit sebelum waktu habis (0 = kapan saja). */
+const finLeft = () => (X.tol ? exRemaining() - X.tol * 60000 : 0);
+const canFinish = () => finLeft() <= 0;
+const mmss = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)); return (t >= 3600 ? Math.floor(t / 3600) + ':' + pad(Math.floor(t % 3600 / 60)) : Math.floor(t / 60)) + ':' + pad(t % 60); };
+const timerCls = (rem) => 'timer ' + (rem < 300000 ? 'err' : rem < 600000 ? 'warn' : '');
+/** Tombol Selesai. m: 'bar' (bilah bawah), 'side' (panel nomor soal), 'foot' (lembar daftar soal). */
+function finBtn(m) {
+  const cls = m === 'bar' ? 'btn-lg' : m === 'foot' ? 'btn-lg btn-block' : 'btn-block mt16', lbl = m === 'bar' ? 'Selesai' : 'Selesai & Kirim';
+  if (canFinish()) return `<button class="btn btn-ok ${cls}" data-fm="${m}" onclick="confirmFinish()">${I('check')}<span>${lbl}</span></button>`;
+  return `<button class="btn btn-fin-lock ${cls}" data-fm="${m}" onclick="confirmFinish()" aria-label="Tombol Selesai aktif ${X.tol} menit sebelum waktu habis">${I('lock', 'ic-sm')}<span class="fl"><b>${lbl}</b><small data-fincd>aktif ${mmss(finLeft())}</small></span></button>`;
+}
+function cellCls(i) { const q = X.qs[i]; return 'nb ' + (X.rg.has(q.id) ? 'rg' : isAnswered(q) ? 'ans' : '') + (i === X.idx ? ' cur' : ''); }
+function exQHTML(q) {
+  const n = X.qs.length;
+  return `<div class="q-card"><div class="flex items-c g12 wrap jc-b"><span class="q-no">SOAL ${q.no} DARI ${n}</span><span class="small tx2">${TIPE_SOAL[q.tipe]}</span><span class="pill pill-info">Bobot: ${fmtN(q.bobot)} poin</span></div>
         <div class="divider"></div><div class="q-text">${esc(q.teks)}</div>
-        ${q.img ? `<img class="q-img" src="${esc(q.img)}" alt="Gambar soal" onclick="previewPublic('Gambar soal ${q.no}','','IMG');setTimeout(()=>{const im=$('.sheet-bd img');if(im)im.src='${esc(q.img)}'},30)">` : ''}
+        ${q.img ? `<img class="q-img" src="${esc(q.img)}" alt="Gambar soal" decoding="async" onclick="previewPublic('Gambar soal ${q.no}','','IMG');setTimeout(()=>{const im=$('.sheet-bd img');if(im)im.src='${esc(q.img)}'},30)">` : ''}
         ${q.tipe === 'MCMA' ? `<div class="banner banner-info mt16" style="padding:10px 12px">${I('checkbox', 'ic-sm')}<span>Pilih lebih dari satu jawaban${q.n ? ` (${q.n} jawaban benar)` : ''}.</span></div>` : ''}
       </div>
       ${answerArea(q)}
-      <p class="tc small muted mt16">${I('info', 'ic-sm')} Ketuk pilihan untuk menyimpan jawaban seketika</p>
-    </div>
-    <aside class="ex-side only-lg">${navPanel()}</aside></div>
-    <div class="ex-bottom"><button class="navpill" onclick="openNavSheetEx()">${I('grid', 'ic-sm')}Nomor Soal ${I('chev-u', 'ic-sm')} <span class="mono">(${answeredCount()}/${n})</span></button>
+      <p class="tc small muted mt16">${I('info', 'ic-sm')} Ketuk pilihan untuk menyimpan jawaban seketika</p>`;
+}
+function exBottomHTML() {
+  const q = X.qs[X.idx], n = X.qs.length, rg = X.rg.has(q.id);
+  return `<button class="navpill" onclick="openNavSheetEx()">${I('grid', 'ic-sm')}Daftar Soal ${I('chev-u', 'ic-sm')} <span class="mono" data-ex="cnt">(${answeredCount()}/${n})</span></button>
       <div class="row"><button class="btn btn-secondary btn-lg" onclick="exNav(-1)" ${X.idx === 0 ? 'disabled' : ''}>${I('chev-l')}<span>Sebelumnya</span></button>
-        <button class="btn ${X.rg.has(q.id) ? 'btn-warn-o' : 'btn-secondary'} btn-lg" style="${X.rg.has(q.id) ? 'background:var(--warn);color:#fff;border-color:var(--warn)' : 'color:var(--warn-x);border-color:#FCD34D;background:var(--warn-t)'}" onclick="toggleRagu()">${I('flag')}<span>Ragu-ragu</span></button>
-        ${X.idx === n - 1 ? `<button class="btn btn-ok btn-lg" onclick="confirmFinish()">${I('check')}<span>Selesai</span></button>` : `<button class="btn btn-primary btn-lg" onclick="exNav(1)"><span>Berikutnya</span>${I('chev-r')}</button>`}</div></div>`;
+        <button class="btn btn-lg btn-ragu ${rg ? 'on' : ''}" id="exRagu" onclick="toggleRagu()">${I('flag')}<span>Ragu-ragu</span></button>
+        ${X.idx === n - 1 ? finBtn('bar') : `<button class="btn btn-primary btn-lg" onclick="exNav(1)"><span>Berikutnya</span>${I('chev-r')}</button>`}</div>`;
+}
+/** Bangun seluruh layar ujian (sekali saat masuk / setelah status berubah). Pindah soal hanya mengganti bagian soal. */
+function renderExam() {
+  const q = X.qs[X.idx], n = X.qs.length, rem = exRemaining(), off = !navigator.onLine, ans = answeredCount();
+  X.lastClock = ''; X.lastTCls = ''; X.finOk = canFinish(); X.offShown = off;
+  $('#exam').innerHTML = `<div class="offline-bar" id="exOff" ${off ? '' : 'hidden'}>${I('wifi-off', 'ic-sm')}Sinyal terputus — jawaban aman tersimpan di perangkat</div>
+    <div class="ex-top"><div class="flex items-s jc-b g12" style="max-width:1240px;margin:0 auto"><div class="f1" style="min-width:0"><div class="lbl">CBT ${esc(shortName(cfg().nama_aplikasi).split(' ')[0])}</div><h2 class="truncate">${esc(X.ul.judul)}</h2><div class="small muted">${esc(mapelNm(X.ul.mapel_id))} · ${n} Soal</div></div>
+      <div class="col items-e g6"><div class="${timerCls(rem)}" id="exTimer">${I('clock')}<span>${D.clock(rem)}</span></div><span class="viol-pill ${X.v ? 'on' : ''}" id="exViol">${I('alert', 'ic-sm')}Pelanggaran ${X.v}/${X.limit}</span></div></div>
+      <div class="ex-sub" style="max-width:1240px;margin:10px auto 0"><span class="sync-dot ${X.syncing ? 'busy' : off ? 'off' : ''}" id="exSync">${X.dirty ? 'Tersimpan di perangkat' : 'Tersimpan otomatis · ' + D.t(X.lastSync) + ' ' + TZL}</span><span class="mono xs muted">NIS: ${esc(me().nis_nip || '')}</span></div>
+      <div class="ex-prog" aria-hidden="true"><i data-ex="bar" style="width:${ans / n * 100}%"></i></div></div>
+    <div class="ex-body"><div id="exQ"><div class="q-wrap">${exQHTML(q)}</div></div>
+    <aside class="ex-side only-lg" id="exSide">${navPanel()}</aside></div>
+    <div class="ex-bottom" id="exBot">${exBottomHTML()}</div>`;
+  exPreload();
 }
 function answerArea(q) {
   const v = X.a[q.id];
-  if (q.tipe === 'PG') return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt ${v === o.k ? 'sel' : ''}" onclick="ansPG('${q.id}','${o.k}')"><span class="lt">${'ABCDE'[i]}</span><span class="f1 pre">${esc(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`;
-  if (q.tipe === 'MCMA') { const sel = Array.isArray(v) ? v : []; return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt mc ${sel.indexOf(o.k) >= 0 ? 'sel' : ''}" onclick="ansMC('${q.id}','${o.k}')"><span class="lt">${sel.indexOf(o.k) >= 0 ? I('check', 'ic-sm') : 'ABCDE'[i]}</span><span class="f1 pre">${esc(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`; }
-  if (q.tipe === 'KATEGORI') { const sel = Array.isArray(v) ? v : []; return `<table class="cat-tbl"><thead><tr><th>Pernyataan</th>${q.kat.map((k) => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${q.pern.map((p, i) => `<tr><td>${esc(p)}</td>${q.kat.map((k, ki) => `<td class="rc ${sel[i] === k ? 'on' : ''}" onclick="ansKat('${q.id}',${i},${ki})"><span class="rdo"></span></td>`).join('')}</tr>`).join('')}</tbody></table>`; }
+  if (q.tipe === 'PG') return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt ${v === o.k ? 'sel' : ''}" data-k="${esc(o.k)}" onclick="ansPG('${q.id}','${o.k}')"><span class="lt">${'ABCDE'[i]}</span><span class="f1 pre">${esc(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`;
+  if (q.tipe === 'MCMA') { const sel = Array.isArray(v) ? v : []; return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt mc ${sel.indexOf(o.k) >= 0 ? 'sel' : ''}" data-k="${esc(o.k)}" data-l="${'ABCDE'[i]}" onclick="ansMC('${q.id}','${o.k}')"><span class="lt">${sel.indexOf(o.k) >= 0 ? I('check', 'ic-sm') : 'ABCDE'[i]}</span><span class="f1 pre">${esc(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`; }
+  if (q.tipe === 'KATEGORI') { const sel = Array.isArray(v) ? v : []; return `<table class="cat-tbl"><thead><tr><th>Pernyataan</th>${q.kat.map((k) => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${q.pern.map((p, i) => `<tr><td>${esc(p)}</td>${q.kat.map((k, ki) => `<td class="rc ${sel[i] === k ? 'on' : ''}" data-r="${i}" data-c="${ki}" onclick="ansKat('${q.id}',${i},${ki})"><span class="rdo"></span></td>`).join('')}</tr>`).join('')}</tbody></table>`; }
   return `<div class="q-card mt16"><textarea class="textarea" id="esaiBox" style="min-height:200px;font-size:16px" maxlength="5000" placeholder="Tulis jawaban esai di sini…" oninput="ansEsai('${q.id}',this.value)">${esc(v || '')}</textarea><div class="flex jc-b small muted mt8"><span>${I('cloud-ok', 'ic-sm')} Tersimpan otomatis</span><span id="esaiCnt">${String(v || '').length}/5000</span></div></div>`;
 }
-function navPanel() {
-  const n = X.qs.length, ans = answeredCount(), rg = X.qs.filter((q) => X.rg.has(q.id)).length;
-  return `<div class="card card-p"><div class="flex items-c jc-b"><h3>Nomor Soal</h3><span class="mono small">${ans}/${n}</span></div><div class="meter mt8"><i style="width:${ans / n * 100}%"></i></div>
-    <div class="navgrid mt16">${X.qs.map((q, i) => `<button class="nb ${X.rg.has(q.id) ? 'rg' : isAnswered(q) ? 'ans' : ''} ${i === X.idx ? 'cur' : ''}" onclick="exGo(${i})">${i + 1}</button>`).join('')}</div>
-    <div class="legend"><span><i style="background:var(--p600);border-color:var(--p600)"></i>Dijawab (${ans - X.qs.filter((q) => X.rg.has(q.id) && isAnswered(q)).length})</span><span><i></i>Belum (${n - ans})</span><span><i style="background:var(--warn);border-color:var(--warn)"></i>Ragu (${rg})</span></div>
-    <button class="btn btn-ok btn-block mt16" onclick="confirmFinish()">${I('check')}Selesai & Kirim</button></div>`;
+function navStats() {
+  let ans = 0, rg = 0, rgAns = 0;
+  X.qs.forEach((q) => { const a = isAnswered(q), r = X.rg.has(q.id); if (a) ans++; if (r) { rg++; if (a) rgAns++; } });
+  return { n: X.qs.length, ans, rg, ok: ans - rgAns, bel: X.qs.length - ans };
 }
-function openNavSheetEx() { sheet({ title: 'Nomor Soal', body: navPanel().replace('class="card card-p"', 'class=""') }); }
-function exGo(i) { closeAllSheets(); X.idx = clamp(i, 0, X.qs.length - 1); saveExLocal(); renderExam(); window.scrollTo(0, 0); $('#exam').scrollTo(0, 0); }
-function exNav(d) { exGo(X.idx + d); }
-function setAns(qid, v) { X.a[qid] = v; X.dirty = true; saveExLocal(); }
-function ansPG(qid, k) { setAns(qid, X.a[qid] === k ? '' : k); refreshAnswer(); }
-function ansMC(qid, k) { const s = Array.isArray(X.a[qid]) ? X.a[qid].slice() : []; const i = s.indexOf(k); if (i >= 0) s.splice(i, 1); else s.push(k); setAns(qid, s.sort()); refreshAnswer(); }
-function ansKat(qid, i, ki) { const q = X.qs.find((x) => x.id === qid), k = q.kat[ki]; const s = Array.isArray(X.a[qid]) ? X.a[qid].slice() : q.pern.map(() => null); s[i] = s[i] === k ? null : k; setAns(qid, s); refreshAnswer(); }
+function navLegend(st) {
+  return `<div class="legend"><span><i style="background:var(--p600);border-color:var(--p600)"></i>Dijawab (<b data-ex="ok">${st.ok}</b>)</span><span><i></i>Belum (<b data-ex="bel">${st.bel}</b>)</span><span><i style="background:var(--warn);border-color:var(--warn)"></i>Ragu (<b data-ex="rg">${st.rg}</b>)</span></div>`;
+}
+function navPanel() {
+  const st = navStats();
+  return `<div class="card card-p"><div class="flex items-c jc-b"><h3>Nomor Soal</h3><span class="mono small" data-ex="frac">${st.ans}/${st.n}</span></div><div class="meter mt8"><i data-ex="bar" style="width:${st.ans / st.n * 100}%"></i></div>
+    <div class="navgrid mt16">${X.qs.map((q, i) => `<button class="${cellCls(i)}" data-i="${i}" onclick="exGo(${i})">${i + 1}</button>`).join('')}</div>
+    ${navLegend(st)}
+    <button class="btn btn-ghost btn-sm btn-block mt12" onclick="openNavSheetEx()">${I('list', 'ic-sm')}Lihat semua soal</button>
+    ${finBtn('side')}</div>`;
+}
+/** Lembar "Daftar Soal": semua nomor + daftar soal lengkap dengan status, bisa disaring (Belum / Ragu / Dijawab). */
+const exClearToasts = () => { const tb = $('#toasts'); if (tb) tb.innerHTML = ''; };
+function openNavSheetEx() {
+  closeAllSheets(); exClearToasts();
+  const st = navStats(), f0 = st.bel ? 'bel' : 'all';
+  const row = (q, i) => { const a = isAnswered(q), r = X.rg.has(q.id), sc = r ? 'rg' : a ? 'ans' : 'bel';
+    const t = String(q.teks || '').replace(/\s+/g, ' ').trim();
+    return `<button class="nv-row s-${sc}${i === X.idx ? ' cur' : ''}" data-i="${i}" onclick="exGo(${i})"><span class="nv-no">${i + 1}</span><span class="f1" style="min-width:0"><span class="nv-t">${esc(t.length > 150 ? t.slice(0, 150) + '…' : t) || (q.img ? '(Soal bergambar)' : '-')}</span><span class="nv-m">${TIPE_SOAL[q.tipe]} · <b>${r ? 'Ragu-ragu' : a ? 'Sudah dijawab' : 'Belum dijawab'}</b></span></span>${I('chev-r', 'ic-sm muted')}</button>`; };
+  sheet({ title: 'Daftar Soal', icon: 'list', body: `<div class="nv-wrap" data-f="${f0}">
+      <div class="flex items-c jc-b small"><span class="tx2"><b class="mono" data-ex="frac">${st.ans}/${st.n}</b> soal dijawab</span><span class="mono small ${exRemaining() < 600000 ? 'ink-err' : 'tx2'}">${I('clock', 'ic-sm')} <span data-ex="clock">${D.clock(exRemaining())}</span></span></div>
+      <div class="meter mt8"><i data-ex="bar" style="width:${st.ans / st.n * 100}%"></i></div>
+      <div class="nv-f mt12" role="tablist">${[['all', 'Semua', st.n], ['bel', 'Belum dijawab', st.bel], ['rg', 'Ragu-ragu', st.rg], ['ans', 'Sudah dijawab', st.ok]].map((x) => `<button type="button" data-f="${x[0]}" class="${x[0] === f0 ? 'on' : ''}">${x[1]} <b>${x[2]}</b></button>`).join('')}</div>
+      <div class="navgrid mt12">${X.qs.map((q, i) => `<button class="${cellCls(i)}" data-i="${i}" onclick="exGo(${i})">${i + 1}</button>`).join('')}</div>
+      ${navLegend(st)}
+      <div class="nv-list mt16">${X.qs.map(row).join('')}<div class="nv-none muted small tc">Tidak ada soal pada pilihan ini.</div></div></div>`,
+    foot: finBtn('foot'),
+    mount: (el) => {
+      const w = $('.nv-wrap', el);
+      $$('.nv-f button', el).forEach((b) => { b.onclick = () => { w.dataset.f = b.dataset.f; $$('.nv-f button', el).forEach((x) => x.classList.toggle('on', x === b)); }; });
+      setTimeout(() => { const c = $('.nv-row.cur', el); if (c && w.dataset.f === 'all') c.scrollIntoView({ block: 'center' }); }, 280);
+    } });
+}
+function exGo(i, dir) {
+  if (!X) return;
+  closeAllSheets();
+  const old = X.idx; X.idx = clamp(i, 0, X.qs.length - 1);
+  const q = X.qs[X.idx], box = $('#exQ');
+  if (!box) { renderExam(); return; }
+  const w = document.createElement('div'); w.className = 'q-wrap ' + ((dir || X.idx - old) >= 0 ? 'in-r' : 'in-l'); w.innerHTML = exQHTML(q);
+  box.replaceChildren(w);
+  $('#exBot').innerHTML = exBottomHTML();
+  $$('.nb[data-i="' + old + '"], .nb[data-i="' + X.idx + '"]').forEach((b) => { b.className = cellCls(+b.dataset.i); });
+  $('#exam').scrollTo(0, 0); window.scrollTo(0, 0);
+  queueSave(); exPreload();
+}
+function exNav(d) { exGo(X.idx + d, d); }
+/** Muat lebih dulu gambar soal sebelum & sesudahnya → pindah soal tanpa jeda. */
+function exPreload() { X.pre = X.pre || {}; [X.idx + 1, X.idx - 1, X.idx + 2].forEach((i) => { const q = X.qs[i]; if (q && q.img && !X.pre[q.img]) { const im = new Image(); im.decoding = 'async'; im.src = q.img; X.pre[q.img] = im; } }); }
+function setAns(qid, v) { X.a[qid] = v; X.dirty = true; queueSave(); }
+function ansPG(qid, k) { setAns(qid, X.a[qid] === k ? '' : k); paintAns(); }
+function ansMC(qid, k) { const s = Array.isArray(X.a[qid]) ? X.a[qid].slice() : []; const i = s.indexOf(k); if (i >= 0) s.splice(i, 1); else s.push(k); setAns(qid, s.sort()); paintAns(); }
+function ansKat(qid, i, ki) { const q = X.qs.find((x) => x.id === qid), k = q.kat[ki]; const s = Array.isArray(X.a[qid]) ? X.a[qid].slice() : q.pern.map(() => null); s[i] = s[i] === k ? null : k; setAns(qid, s); paintAns(); }
 const ansEsai = (qid, val) => { X.a[qid] = val; X.dirty = true; const c = $('#esaiCnt'); if (c) c.textContent = val.length + '/5000'; saveEsaiDeb(); };
 const saveEsaiDeb = debounce(() => { saveExLocal(); updateExChrome(); }, 400);
-function refreshAnswer() {   // render sebagian saja agar instan
-  const q = X.qs[X.idx], body = $('#exam .ex-body > div');
-  const old = body.querySelector('.opts, .cat-tbl'); if (old) old.outerHTML = answerArea(q);
+/** Tandai pilihan langsung pada tombol yang ada (tanpa membangun ulang) → ketukan terasa instan. */
+function paintAns() {
+  const q = X.qs[X.idx], v = X.a[q.id];
+  if (q.tipe === 'PG') $$('#exQ .opt').forEach((b) => b.classList.toggle('sel', v === b.dataset.k));
+  else if (q.tipe === 'MCMA') { const sel = Array.isArray(v) ? v : []; $$('#exQ .opt').forEach((b) => { const on = sel.indexOf(b.dataset.k) >= 0; if (b.classList.contains('sel') !== on) { b.classList.toggle('sel', on); b.querySelector('.lt').innerHTML = on ? I('check', 'ic-sm') : b.dataset.l; } }); }
+  else if (q.tipe === 'KATEGORI') { const sel = Array.isArray(v) ? v : []; $$('#exQ td.rc').forEach((td) => td.classList.toggle('on', sel[+td.dataset.r] === q.kat[+td.dataset.c])); }
   updateExChrome();
 }
+function refreshAnswer() { paintAns(); }
+/** Perbarui hanya penanda kecil: nomor soal aktif, hitungan, bilah progres, status simpan. */
 function updateExChrome() {
-  const side = $('#exam .ex-side'); if (side) side.innerHTML = navPanel();
-  const np = $('#exam .navpill .mono'); if (np) np.textContent = `(${answeredCount()}/${X.qs.length})`;
+  if (!X) return;
+  const st = navStats(), pct = st.ans / st.n * 100 + '%';
+  $$('.nb[data-i="' + X.idx + '"]').forEach((b) => { b.className = cellCls(X.idx); });
+  $$('.nv-row[data-i="' + X.idx + '"]').forEach((r) => { const q = X.qs[X.idx], a = isAnswered(q), g = X.rg.has(q.id); r.className = 'nv-row s-' + (g ? 'rg' : a ? 'ans' : 'bel') + ' cur'; const m = r.querySelector('.nv-m b'); if (m) m.textContent = g ? 'Ragu-ragu' : a ? 'Sudah dijawab' : 'Belum dijawab'; });
+  const set = (k, v) => $$('[data-ex="' + k + '"]').forEach((e) => { if (e.textContent !== v) e.textContent = v; });
+  set('cnt', `(${st.ans}/${st.n})`); set('frac', `${st.ans}/${st.n}`); set('ok', String(st.ok)); set('bel', String(st.bel)); set('rg', String(st.rg));
+  $$('[data-ex="bar"]').forEach((e) => { e.style.width = pct; });
   const sy = $('#exSync'); if (sy) { sy.className = 'sync-dot ' + (X.syncing ? 'busy' : !navigator.onLine ? 'off' : ''); sy.textContent = X.dirty ? 'Tersimpan di perangkat' : 'Tersimpan otomatis · ' + D.t(X.lastSync) + ' ' + TZL; }
 }
-function toggleRagu() { const q = X.qs[X.idx]; if (X.rg.has(q.id)) X.rg.delete(q.id); else X.rg.add(q.id); X.dirty = true; saveExLocal(); renderExam(); }
+function toggleRagu() {
+  const q = X.qs[X.idx]; if (X.rg.has(q.id)) X.rg.delete(q.id); else X.rg.add(q.id);
+  X.dirty = true; queueSave();
+  const b = $('#exRagu'); if (b) b.classList.toggle('on', X.rg.has(q.id));
+  updateExChrome();
+}
 function tickExam() {
   if (!X || !X.active) return;
-  const rem = exRemaining(), el = $('#exTimer');
-  if (el) { el.querySelector('span').textContent = D.clock(rem); el.className = 'timer ' + (rem < 300000 ? 'err' : rem < 600000 ? 'warn' : ''); }
+  const rem = exRemaining(), ck = D.clock(rem), tc = timerCls(rem);
+  if (ck !== X.lastClock) { X.lastClock = ck; const el = $('#exTimer span'); if (el) el.textContent = ck; $$('[data-ex="clock"]').forEach((e) => { e.textContent = ck; }); }
+  if (tc !== X.lastTCls) { X.lastTCls = tc; const el = $('#exTimer'); if (el) el.className = tc; }
+  if (X.tol) {
+    const ok = canFinish();
+    if (ok !== X.finOk) { X.finOk = ok; $$('[data-fm]').forEach((b) => { b.outerHTML = finBtn(b.dataset.fm); }); if (ok) toast('Tombol Selesai sudah aktif. Periksa jawaban sebelum mengirim.', 'info'); }
+    else if (!ok) { const t = 'aktif ' + mmss(finLeft()); $$('[data-fincd]').forEach((e) => { e.textContent = t; }); }
+  }
+  const off = !navigator.onLine; if (off !== X.offShown) { X.offShown = off; const ob = $('#exOff'); if (ob) ob.hidden = !off; updateExChrome(); }
   if (rem <= 0 && X.status === 'MENGERJAKAN' && !X.submitting) finishExam('WAKTU');
+}
+/** Pintasan papan ketik (laptop/PC lab): ← → pindah soal, A–E memilih jawaban. */
+function exKeyDown(e) {
+  if (!X || !X.active || X.status !== 'MENGERJAKAN' || SHEETS.length || $('#exOverlay') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target && /TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) return;
+  if (e.key === 'ArrowRight' && X.idx < X.qs.length - 1) { e.preventDefault(); exNav(1); }
+  else if (e.key === 'ArrowLeft' && X.idx > 0) { e.preventDefault(); exNav(-1); }
+  else if (/^[a-eA-E]$/.test(e.key)) { const o = $$('#exQ .opt')['abcde'.indexOf(e.key.toLowerCase())]; if (o) { e.preventDefault(); o.click(); } }
 }
 function scheduleSync() {
   if (!X) return;
@@ -498,8 +597,11 @@ function showLocked() {
 }
 function hideOverlay() { const o = $('#exOverlay'); if (o) o.remove(); }
 function confirmFinish() {
+  if (!X || X.status !== 'MENGERJAKAN') return;
+  if (!canFinish()) { toast(`Tombol Selesai aktif ${X.tol} menit sebelum waktu habis (±${mmss(finLeft())} lagi). Gunakan waktu untuk memeriksa jawaban.`, 'warn', 5000); return; }
+  closeAllSheets(); exClearToasts();
   const n = X.qs.length, kos = n - answeredCount(), rg = X.rg.size;
-  confirmBox(kos || rg ? `Masih ada <b>${kos} soal kosong</b> dan <b>${rg} ragu-ragu</b>. Yakin mengirim jawaban sekarang?` : 'Semua soal sudah dijawab. Kirim jawaban sekarang? Jawaban tidak bisa diubah setelah dikirim.', { title: 'Kirim jawaban?', icon: 'send', yes: 'Kirim Jawaban', no: 'Periksa lagi' }).then((ok) => { if (ok) finishExam('SELESAI'); });
+  confirmBox(kos || rg ? `Masih ada <b>${kos} soal kosong</b> dan <b>${rg} ragu-ragu</b>. Yakin mengirim jawaban sekarang?` : 'Semua soal sudah dijawab. Kirim jawaban sekarang? Jawaban tidak bisa diubah setelah dikirim.', { title: 'Kirim jawaban?', icon: 'send', yes: 'Kirim Jawaban', no: 'Periksa lagi', extra: kos ? `<button class="btn btn-ghost btn-sm mt12" onclick="closeAllSheets();setTimeout(openNavSheetEx,280)">${I('list', 'ic-sm')}Lihat soal yang belum dijawab</button>` : '' }).then((ok) => { if (ok) finishExam('SELESAI'); });
 }
 function finishExam(reason) {
   if (!X || X.submitting) return;
@@ -520,6 +622,7 @@ function exitExam(silent) {
   if (!X) return;
   X.active = false; X.timers.forEach((t) => { clearInterval(t); clearTimeout(t); });
   document.removeEventListener('visibilitychange', onExVisibility); document.removeEventListener('fullscreenchange', onExFS); document.removeEventListener('webkitfullscreenchange', onExFS);
+  document.removeEventListener('keydown', exKeyDown); window.removeEventListener('pagehide', saveExLocal); clearTimeout(X.saveT);
   window.onbeforeunload = null; hideOverlay();
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) { /* abaikan */ }
   $('#exam').hidden = true; $('#exam').innerHTML = '';
