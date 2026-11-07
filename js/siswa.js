@@ -75,6 +75,7 @@ route('s-home', {
         ${sec(homeSorotan(sw, belum, aktif, soon, agenda))}
         ${sec(`<div class="qa-row hscroll">${[['clipboard', 'Tugas', belum.length, "go('s-tugas')", 'q-warn'], ['exam', 'Ujian', aktif.length, "go('s-ujian')", 'q-p'], ['book', 'Mapel', 0, "go('s-mapel')", 'q-vio'], ['star', 'Nilai', 0, "go('s-nilai')", 'q-ok'], ['clock', 'Jadwal', 0, "go('jadwal')", 'q-sky'], ['calendar', 'Agenda', 0, "go('agenda')", 'q-pink']]
           .map((q) => `<button class="qa ${q[4]}" onclick="${q[3]}"><span class="qa-ic">${I(q[0])}</span><span>${q[1]}</span>${q[2] ? `<b class="qa-n">${q[2]}</b>` : ''}</button>`).join('')}</div>`)}
+        ${sec(homeNilai(sw))}
         ${sec(jadwalStrip('siswa'))}
         ${sec(`<div class="sect-title"><h2>Belum Dikerjakan</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-tugas')">Lihat Semua ${I('chev-r', 'ic-sm')}</a></div>
         <div class="grid ${desk ? 'gc2' : ''}">${aktif.map(examCard).join('')}${belum.slice(0, desk ? 6 : 4).map(taskCard).join('')}
@@ -89,6 +90,29 @@ route('s-home', {
       </div></div>`;
   }
 });
+/** Nilai ulangan siswa di beranda: rata-rata, tertinggi, tren, dan daftar ulangan terbaru — penyemangat belajar. */
+function homeNilai(sw) {
+  const kkm = num(cfg().kkm, 75) || 75;
+  const done = sw.ulangan.filter((u) => u.my && (u.my.status === 'SELESAI' || u.my.status === 'TERKUNCI')).sort((a, b) => (num(b.my.selesai) || b.buka) - (num(a.my.selesai) || a.buka));
+  if (!done.length) return '';
+  const graded = done.filter((u) => u.my.nilai !== null && u.my.nilai !== undefined && u.my.status_nilai !== 'MENUNGGU_KOREKSI');
+  const vals = graded.map((u) => num(u.my.nilai)), avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  const best = graded.slice().sort((a, b) => num(b.my.nilai) - num(a.my.nilai))[0], tuntas = vals.filter((v) => v >= kkm).length;
+  const tr = vals.length >= 2 ? vals[0] - vals[1] : null;
+  const msg = avg === null ? 'Nilaimu sedang dikoreksi guru. Tunggu ya!'
+    : avg >= 90 ? 'Luar biasa! Kamu di jalur juara — pertahankan!' : tr !== null && tr > 0 ? `Mantap! Nilai terbarumu naik ${fmtN(tr)} poin. Terus semangat!`
+    : avg >= kkm ? `Kamu sudah tuntas KKM ${kkm}. Ayo raih nilai yang lebih tinggi!` : `Semangat! Rata-ratamu ${fmtN(kkm - avg)} poin lagi menuju KKM ${kkm}. Kamu pasti bisa!`;
+  const col = avg === null ? 'var(--tx3)' : avg >= kkm ? '#16A34A' : '#D97706', C = 2 * Math.PI * 42, f = avg === null ? 0 : Math.max(0, Math.min(1, avg / 100));
+  const row = (u) => { const m = u.my, n = m.nilai, wait = m.status_nilai === 'MENUNGGU_KOREKSI', hid = n === null || n === undefined;
+    return `<button class="nl-row" onclick="go('s-nilai')"><span class="nl-mp mp${hashN(u.mapel_id) % 6}">${I(mapelBy(u.mapel_id).ikon || 'book', 'ic-sm')}</span><span class="f1" style="min-width:0"><span class="nl-t truncate">${esc(u.judul)}</span><span class="nl-s">${esc(mapelNm(u.mapel_id))} · ${esc(JENIS_UL[u.jenis] || u.jenis)}</span>
+      ${!hid && !wait ? `<span class="nl-bar"><i style="width:${Math.max(0, Math.min(100, n))}%;background:${n >= kkm ? 'var(--ok)' : 'var(--warn)'}"></i></span>` : ''}</span>
+      ${wait ? '<span class="pill pill-vio">Dikoreksi</span>' : hid ? '<span class="xs muted">Belum diumumkan</span>' : `<b class="nl-v ${n >= kkm ? 'ok' : 'low'}" ${Number.isInteger(n) ? `data-count="${n}"` : ''}>${fmtN(n)}</b>`}</button>`; };
+  return `<div class="sect-title"><h2>Nilai Ulanganmu</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-nilai')">Semua Nilai ${I('chev-r', 'ic-sm')}</a></div>
+    <div class="card nl-card"><div class="nl-hd"><div class="nl-ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="9"/>${f > 0 ? `<circle class="nl-arc" cx="50" cy="50" r="42" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * f} ${C}" transform="rotate(-90 50 50)"/>` : ''}</svg><div class="nl-avg"><b ${avg !== null ? `data-count="${Math.round(avg)}"` : ''}>${avg === null ? '–' : fmtN(Math.round(avg))}</b><span>rata-rata</span></div></div>
+      <div class="f1" style="min-width:0"><div class="nl-msg">${I(avg !== null && avg >= kkm ? 'star' : 'sparkles', 'ic-sm')}<span>${esc(msg)}</span></div>
+        <div class="nl-chips">${best ? `<span class="nl-chip">${I('trending', 'ic-sm')}Tertinggi <b>${fmtN(best.my.nilai)}</b> ${esc(mapelNm(best.mapel_id))}</span>` : ''}${vals.length ? `<span class="nl-chip">${I('check-c', 'ic-sm')}Tuntas <b>${tuntas}/${vals.length}</b></span>` : ''}${tr !== null ? `<span class="nl-chip ${tr >= 0 ? 'up' : 'down'}">${I(tr >= 0 ? 'chev-u' : 'chev-d', 'ic-sm')}${tr >= 0 ? 'Naik' : 'Turun'} <b>${fmtN(Math.abs(tr))}</b></span>` : ''}</div></div></div>
+      <div class="nl-list">${done.slice(0, 5).map(row).join('')}</div></div>`;
+}
 /** Sorotan beranda siswa: ujian berlangsung, tenggat terdekat, ujian segera, nilai terbaru, agenda — bergeser otomatis. */
 function homeSorotan(sw, belum, aktif, soon, agenda) {
   const t = now(), out = [];
@@ -340,6 +364,7 @@ function enterExam(d, u) {
     dirty: !!local, lastSync: Date.now(), lastViol: 0, syncing: false, timers: [], status: d.attempt.status, startedAt: Date.now(), navOpen: false,
     tol: Math.max(0, Number(d.ulangan.tol) || 0)
   };
+  X.wm = exWatermark(); X.guard = { blur: false, small: false, t: 0 };
   LS.set('sp_ex_active', { u: me().user_id, ulangan_id: X.ul.ulangan_id, attempt_id: X.att.id });
   u.my = Object.assign(u.my || {}, { status: 'MENGERJAKAN' });
   $('#shell').hidden = true; const ex = $('#exam'); ex.hidden = false; closeAllSheets();
@@ -351,7 +376,10 @@ function enterExam(d, u) {
   document.addEventListener('webkitfullscreenchange', onExFS);
   ex.addEventListener('copy', blockEv); ex.addEventListener('contextmenu', blockEv); ex.addEventListener('cut', blockEv);
   document.addEventListener('keydown', exKeyDown); window.addEventListener('pagehide', saveExLocal);
+  window.addEventListener('blur', onExBlur); window.addEventListener('focus', onExFocus); window.addEventListener('resize', onExResize);
+  document.addEventListener('keyup', onExKeyShot, true); document.addEventListener('keydown', onExKeyShot, true);
   X.timers.push(setInterval(tickExam, 1000));
+  setTimeout(() => { if (X && X.active) { if (!document.hasFocus()) onExBlur(); onExResize(); } }, 1200);
   scheduleSync();
   window.onbeforeunload = () => { if (X && X.active) { saveExLocal(); return 'Ujian sedang berlangsung.'; } };
 }
@@ -400,10 +428,11 @@ function renderExam() {
       <div class="col items-e g6"><div class="${timerCls(rem)}" id="exTimer">${I('clock')}<span>${D.clock(rem)}</span></div><span class="viol-pill ${X.v ? 'on' : ''}" id="exViol">${I('alert', 'ic-sm')}Pelanggaran ${X.v}/${X.limit}</span></div></div>
       <div class="ex-sub" style="max-width:1240px;margin:10px auto 0"><span class="sync-dot ${X.syncing ? 'busy' : off ? 'off' : ''}" id="exSync">${X.dirty ? 'Tersimpan di perangkat' : 'Tersimpan otomatis · ' + D.t(X.lastSync) + ' ' + TZL}</span><span class="mono xs muted">NIS: ${esc(me().nis_nip || '')}</span></div>
       <div class="ex-prog" aria-hidden="true"><i data-ex="bar" style="width:${ans / n * 100}%"></i></div></div>
-    <div class="ex-body"><div id="exQ"><div class="q-wrap">${exQHTML(q)}</div></div>
+    <div class="ex-body"><div class="ex-wm" aria-hidden="true" style="background-image:${X.wm}"></div><div id="exQ"><div class="q-wrap">${exQHTML(q)}</div></div>
     <aside class="ex-side only-lg" id="exSide">${navPanel()}</aside></div>
-    <div class="ex-bottom" id="exBot">${exBottomHTML()}</div>`;
-  exPreload();
+    <div class="ex-bottom" id="exBot">${exBottomHTML()}</div>
+    <div class="ex-shield" id="exShield" aria-live="polite"><div>${I('eye-off', 'ic-2x')}<h2>Soal disembunyikan</h2><p id="exShieldMsg">Kembali ke halaman ujian untuk melanjutkan.</p></div></div>`;
+  exPreload(); exGuardPaint();
 }
 function answerArea(q) {
   const v = X.a[q.id];
@@ -508,6 +537,7 @@ function tickExam() {
     if (ok !== X.finOk) { X.finOk = ok; $$('[data-fm]').forEach((b) => { b.outerHTML = finBtn(b.dataset.fm); }); if (ok) toast('Tombol Selesai sudah aktif. Periksa jawaban sebelum mengirim.', 'info'); }
     else if (!ok) { const t = 'aktif ' + mmss(finLeft()); $$('[data-fincd]').forEach((e) => { e.textContent = t; }); }
   }
+  if (exTouch()) onExResize();
   const off = !navigator.onLine; if (off !== X.offShown) { X.offShown = off; const ob = $('#exOff'); if (ob) ob.hidden = !off; updateExChrome(); }
   if (rem <= 0 && X.status === 'MENGERJAKAN' && !X.submitting) finishExam('WAKTU');
 }
@@ -557,6 +587,53 @@ function recoverExam() {   // cache server hilang (sangat jarang): mulai ulang s
 function requestFS() { const el = document.documentElement; try { if (document.fullscreenEnabled && !document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => { /* tidak didukung */ }); else if (el.webkitRequestFullscreen && !document.webkitFullscreenElement) el.webkitRequestFullscreen(); } catch (e) { /* abaikan */ } }
 function onExVisibility() { if (!X || !X.active) return; if (document.hidden) violation('PINDAH_TAB'); else if (X.pendingAlarm) { X.pendingAlarm = false; alarm(); } }
 function onExFS() { if (!X || !X.active || X.submitting || X.status !== 'MENGERJAKAN') return; if (!(document.fullscreenElement || document.webkitFullscreenElement) && (document.fullscreenEnabled || document.webkitFullscreenEnabled)) violation('KELUAR_LAYAR_PENUH'); }
+const VIOL_MSG = { PINDAH_TAB: 'Anda meninggalkan halaman ujian.', KELUAR_LAYAR_PENUH: 'Anda keluar dari layar penuh.', JENDELA_MENGAMBANG: 'Anda membuka jendela atau aplikasi lain (jendela mengambang / notifikasi / pencarian layar).', LAYAR_TERBAGI: 'Ujian dibuka dalam layar terbagi atau jendela kecil.', TANGKAP_LAYAR: 'Tangkapan layar terdeteksi.' };
+/** Tanda air nama + NIS di atas soal: setiap tangkapan / foto layar langsung menunjukkan pemiliknya. */
+function exWatermark() {
+  const u = me(), raw = String(u.nama || '').slice(0, 34) + ' · ' + (u.nis_nip || u.username || '') + ' · ' + D.d(now());
+  const t = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="220"><text x="10" y="130" transform="rotate(-24 210 110)" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#64748B" fill-opacity=".16">' + t + '</text></svg>';
+  return "url('data:image/svg+xml," + encodeURIComponent(svg).replace(/'/g, '%27') + "')";
+}
+const exTouch = () => !!(window.matchMedia && matchMedia('(pointer:coarse)').matches);
+/** Fokus jendela hilang (jendela mengambang, notifikasi, pencarian layar, snipping) → soal langsung disembunyikan; lebih dari 2 detik = pelanggaran. */
+function onExBlur() {
+  if (!X || !X.active || X.status !== 'MENGERJAKAN' || X.submitting) return;
+  X.guard.blur = true; exGuardPaint();
+  clearTimeout(X.guard.t);
+  X.guard.t = setTimeout(() => { if (X && X.active && X.guard.blur && !document.hasFocus() && !document.hidden) violation('JENDELA_MENGAMBANG'); }, 2000);
+}
+function onExFocus() { if (!X) return; X.guard.blur = false; clearTimeout(X.guard.t); exGuardPaint(); }
+/** Layar terbagi / jendela kecil di HP & tablet: lebar jendela jauh lebih kecil dari layar. */
+function exIsSmall() {
+  if (!exTouch() || !screen || !screen.width) return false;
+  const sw = Math.min(screen.width, screen.height), sh = Math.max(screen.width, screen.height), land = innerWidth > innerHeight;
+  const wr = innerWidth / (land ? sh : sw), hr = innerHeight / (land ? sw : sh);
+  const typing = document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+  return wr < 0.8 || (!typing && hr < 0.45);
+}
+function onExResize() {
+  if (!X || !X.active || X.status !== 'MENGERJAKAN') return;
+  const small = exIsSmall();
+  if (small === X.guard.small) return;
+  X.guard.small = small; exGuardPaint(); clearTimeout(X.guard.st);
+  if (small) X.guard.st = setTimeout(() => { if (X && X.active && X.guard.small) violation('LAYAR_TERBAGI'); }, 1000);
+}
+/** PrintScreen / pintasan tangkapan layar di laptop & PC lab. */
+function onExKeyShot(e) {
+  if (!X || !X.active || X.status !== 'MENGERJAKAN') return;
+  const k = e.key || '', shot = k === 'PrintScreen' || e.keyCode === 44 || (e.metaKey && e.shiftKey && /^[345]$/.test(k)) || (e.shiftKey && (e.metaKey || e.key === 'Meta') && /^s$/i.test(k));
+  if (!shot) return;
+  try { e.preventDefault(); } catch (x) { /* abaikan */ }
+  try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText('').catch(() => { /* izin papan klip ditolak */ }); } catch (x) { /* abaikan */ }
+  if (e.type === 'keyup' || k !== 'PrintScreen') violation('TANGKAP_LAYAR');
+}
+function exGuardPaint() {
+  const ex = $('#exam'); if (!ex || !X) return;
+  const on = X.guard.blur || X.guard.small;
+  ex.classList.toggle('ex-guard', !!on);
+  const m = $('#exShieldMsg'); if (m) m.textContent = X.guard.small ? 'Ujian tidak boleh dikerjakan dalam layar terbagi / jendela mengambang. Kembalikan browser ke layar penuh.' : 'Kembali ke halaman ujian untuk melanjutkan. Membuka aplikasi atau jendela lain dihitung pelanggaran.';
+}
 let AC = null;
 function ensureAudio() { try { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) { AC = null; } }
 function alarm() {
@@ -582,7 +659,7 @@ function showViolation(jenis) {
   hideOverlay();
   const o = document.createElement('div'); o.className = 'ex-overlay viol'; o.id = 'exOverlay';
   o.innerHTML = `<div class="shake">${I('shield-alert', 'ic-2x')}</div><h1>PELANGGARAN TERDETEKSI</h1><div class="cnt">${X.v} dari ${X.limit}</div>
-    <p>${jenis === 'KELUAR_LAYAR_PENUH' ? 'Anda keluar dari layar penuh.' : 'Anda meninggalkan halaman ujian.'} Pelanggaran ke-${X.limit} akan mengunci ujian dan jawaban dikirim otomatis.</p>
+    <p>${VIOL_MSG[jenis] || VIOL_MSG.PINDAH_TAB} Pelanggaran ke-${X.limit} akan mengunci ujian dan jawaban dikirim otomatis.</p>
     <p class="flex items-c g8" style="justify-content:center">${I('volume', 'ic-sm')}Alarm berbunyi</p>
     <button class="btn btn-white btn-lg mt24" style="color:#B91C1C" onclick="hideOverlay();requestFS();renderExam()">${I('arrow-l')}Kembali ke Ujian</button>`;
   document.body.appendChild(o);
@@ -623,6 +700,8 @@ function exitExam(silent) {
   X.active = false; X.timers.forEach((t) => { clearInterval(t); clearTimeout(t); });
   document.removeEventListener('visibilitychange', onExVisibility); document.removeEventListener('fullscreenchange', onExFS); document.removeEventListener('webkitfullscreenchange', onExFS);
   document.removeEventListener('keydown', exKeyDown); window.removeEventListener('pagehide', saveExLocal); clearTimeout(X.saveT);
+  window.removeEventListener('blur', onExBlur); window.removeEventListener('focus', onExFocus); window.removeEventListener('resize', onExResize);
+  document.removeEventListener('keyup', onExKeyShot, true); document.removeEventListener('keydown', onExKeyShot, true); clearTimeout(X.guard && X.guard.t); clearTimeout(X.guard && X.guard.st);
   window.onbeforeunload = null; hideOverlay();
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) { /* abaikan */ }
   $('#exam').hidden = true; $('#exam').innerHTML = '';

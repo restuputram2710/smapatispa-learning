@@ -285,42 +285,209 @@ function remindTugas(tid, kanal) {
 // BAGIAN 15: BANK SOAL, IMPORT, UJIAN CBT (buat, monitor, koreksi, hasil)
 // ════════════════════════════════════════════════════════
 const soalList = () => need('soal', 'soal.list', {}, 120000);
+// ── Berkas soal: soal dikelompokkan per mapel + kelas + jenis penilaian ──
+const JENIS_BK = { UH: 'UH', UTS: 'PTS', UAS: 'PAS', LATIHAN: 'Latihan', '': 'Umum' };
+const JENIS_BK_L = [['UH', 'Ulangan Harian'], ['UTS', 'PTS · Tengah Semester'], ['UAS', 'PAS · Akhir Semester'], ['LATIHAN', 'Latihan'], ['', 'Umum']];
+const bkId = () => 'bk' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+/** Kelompokkan butir soal menjadi berkas. Soal lama (belum berlabel) dikelompokkan otomatis per mapel + guru + ujian pertama yang memakainya. */
+function berkasList(list) {
+  const ulBy = {}; (G().ulangan || []).forEach((u) => { ulBy[u.ulangan_id] = u; });
+  const m = {};
+  list.forEach((s) => {
+    let k, info;
+    if (s.berkas_id) { k = 'B:' + s.berkas_id; info = { berkas_id: s.berkas_id, nama: s.nama_berkas || 'Berkas tanpa nama', kelas_ids: s.kelas_ids || [], jenis: s.jenis || '' }; }
+    else {
+      const u0 = (s.ul || []).map((id) => ulBy[id]).filter(Boolean).sort(by('buka'))[0];
+      k = 'L:' + s.pembuat_id + ':' + s.mapel_id + ':' + (u0 ? u0.ulangan_id : '-');
+      info = { berkas_id: '', nama: u0 ? u0.judul : 'Soal ' + mapelNm(s.mapel_id), kelas_ids: u0 ? u0.kelas_ids || [] : [], jenis: u0 ? u0.jenis || '' : '', legacy: true };
+    }
+    const b = m[k] || (m[k] = Object.assign({ key: k, mapel_id: s.mapel_id, pembuat_id: s.pembuat_id, pembuat: s.pembuat, soal: [], ul: {}, t: 0, tipe: { PG: 0, MCMA: 0, KATEGORI: 0, ESAI: 0 }, skor: 0 }, info));
+    b.soal.push(s); b.tipe[s.tipe] = (b.tipe[s.tipe] || 0) + 1; b.skor += num(s.skor_maks); b.t = Math.max(b.t, num(s.dibuat_pada)); (s.ul || []).forEach((id) => { b.ul[id] = 1; });
+  });
+  Object.keys(S.c.bkDraft || {}).forEach((k) => { if (!m[k]) m[k] = Object.assign({ soal: [], ul: {}, tipe: { PG: 0, MCMA: 0, KATEGORI: 0, ESAI: 0 }, skor: 0, draft: true }, S.c.bkDraft[k]); });
+  return Object.keys(m).map((k) => { const b = m[k]; b.nUl = Object.keys(b.ul).length; b.soal.sort((x, y) => num(x.dibuat_pada) - num(y.dibuat_pada)); return b; }).sort((a, b) => b.t - a.t);
+}
+function bkJenisPill(j) { return `<span class="bk-j j-${j || 'U'}">${esc(JENIS_BK[j || ''] || j)}</span>`; }
+function bkKelas(ids, max) { const l = (ids || []).map(kelasShort); return l.length ? l.slice(0, max || 6).map((k) => `<span class="bk-k">${esc(k)}</span>`).join('') + (l.length > (max || 6) ? `<span class="bk-k">+${l.length - (max || 6)}</span>` : '') : '<span class="xs muted">Kelas belum diatur</span>'; }
+function berkasCard(b, showGuru) {
+  const t = b.tipe, mix = ['PG', 'MCMA', 'KATEGORI', 'ESAI'].filter((k) => t[k]).map((k) => (k === 'PG' ? 'PG' : k === 'ESAI' ? 'Esai' : k === 'MCMA' ? 'MCMA' : 'B/S') + ' ' + t[k]).join(' · ');
+  return `<button class="bk-card" onclick="go('g-berkas',{k:'${b.key}'})"><div class="bk-top"><span class="bk-ic mp${hashN(b.mapel_id) % 6}">${I('file-text')}<b>${b.soal.length}</b></span>
+      <div class="f1" style="min-width:0"><div class="bk-nm">${esc(b.nama)}</div><div class="xs muted truncate mt4">${esc(mapelNm(b.mapel_id))}${showGuru ? ' · ' + esc(b.pembuat || '') : ''}</div></div>${bkJenisPill(b.jenis)}</div>
+    <div class="bk-kls">${bkKelas(b.kelas_ids, 5)}</div>
+    <div class="bk-ft"><span>${b.soal.length} soal${mix ? ' · ' + mix : ''}</span><span class="${b.nUl ? 'ink-ok' : 'muted'}">${b.nUl ? I('check', 'ic-sm') + b.nUl + ' ujian' : b.draft ? 'Berkas baru' : 'Belum dipakai'}</span></div></button>`;
+}
 route('g-bank', {
   title: 'Bank Soal', roles: ['GURU', 'ADMIN'],
   render(p) {
-    const list = soalList();
-    const F = S.c.bankF || (S.c.bankF = { tipe: '', mapel: '', q: '' });
-    const myMapel = uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id);
-    const head = `<div class="page-hd"><div><h1>Bank Soal${F.mapel ? ' — ' + esc(mapelNm(F.mapel)) : ''}</h1><p class="sub">Kelola butir soal Pilihan Ganda, PG Kompleks (MCMA & Kategori), dan Esai untuk ulangan CBT.</p></div>
-      <div class="flex g8 wrap"><button class="btn btn-secondary" onclick="go('g-import')">${I('upload')}Import dari Excel</button><button class="btn btn-primary" onclick="openSoalEditor(null)">${I('plus')}Buat Soal Baru</button></div></div>`;
+    const list = soalList(), admin = hasRole('ADMIN');
+    const F = S.c.bkF || (S.c.bkF = { q: '', jenis: '*', mapel: '', guru: '', kelas: '', view: 'berkas' });
+    const head = `<div class="page-hd"><div><h1>Bank Soal</h1><p class="sub">${admin ? 'Berkas soal semua guru per mata pelajaran — lengkap dengan kelas, jenis penilaian (UH, PTS, PAS), dan penyusunnya.' : 'Berkas soal Anda per kelas. Satu berkas = satu kumpulan soal, misalnya PTS B. Inggris kelas XII-1.'}</p></div>
+      <div class="flex g8 wrap"><button class="btn btn-secondary" onclick="go('g-import')">${I('upload')}Import Berkas Soal</button><button class="btn btn-primary" onclick="openBerkasForm(null)">${I('plus')}Buat Berkas</button></div></div>`;
     if (!list) return `<div class="page">${head}${skelCards(3)}</div>`;
-    const cnt = { PG: 0, MCMA: 0, KATEGORI: 0, ESAI: 0 }; list.forEach((s) => { if (!F.mapel || s.mapel_id === F.mapel) cnt[s.tipe]++; });
-    const rows = list.filter((s) => (!F.tipe || s.tipe === F.tipe) && (!F.mapel || s.mapel_id === F.mapel));
-    const sub = { PG: 'Jawaban tunggal opsi A–E', MCMA: 'Multi-pilihan checkbox', KATEGORI: 'Matriks Benar/Salah', ESAI: 'Koreksi manual & rubrik' };
-    return `<div class="page">${head}
-      <div class="grid gc4">${Object.keys(cnt).map((k) => `<button class="card stat hoverable ${F.tipe === k ? 'sel' : ''}" style="text-align:left" onclick="S.c.bankF.tipe=S.c.bankF.tipe==='${k}'?'':'${k}';rerender()"><div><div class="lbl">${TIPE_SOAL[k]}</div><div class="val">${cnt[k]}<small>Soal</small></div><div class="hint">${sub[k]}</div></div><div class="tile ${k === 'ESAI' ? 'vio' : ''}">${I(TIPE_IC[k])}</div></button>`).join('')}</div>
-      <div class="card mt16"><div class="flex g12 items-c wrap" style="padding:14px 16px;border-bottom:1px solid var(--border)">
-        <select class="select input-sm" style="max-width:220px" onchange="S.c.bankF.mapel=this.value;rerender()"><option value="">Semua mapel</option>${uniqBy(list, (s) => s.mapel_id).map((s) => s.mapel_id).concat(myMapel).filter((v, i, a) => a.indexOf(v) === i).map((m) => `<option value="${m}" ${F.mapel === m ? 'selected' : ''}>Mapel: ${esc(mapelNm(m))}</option>`).join('')}</select>
-        <div class="chips">${[['', 'Semua', list.length]].concat(Object.keys(cnt).map((k) => [k, TIPE_SOAL[k].replace('PG Kompleks ', ''), cnt[k]])).map((x) => `<button class="chip ${F.tipe === x[0] ? 'on' : ''}" onclick="S.c.bankF.tipe='${x[0]}';rerender()">${esc(x[1])} <span class="cnt">${x[2]}</span></button>`).join('')}</div>
-        ${F.tipe || F.mapel ? `<button class="btn btn-ghost btn-sm ml-a" onclick="S.c.bankF={tipe:'',mapel:'',q:''};rerender()">${I('refresh', 'ic-sm')}Reset Filter</button>` : ''}</div>
-      ${dataTable('bank', rows, [
-        { h: 'ID Soal', k: 'soal_id', r: (s) => `<span class="mono xs ink-p bold">#${esc(mapelBy(s.mapel_id).kode || 'S')}-${esc(String(s.soal_id).slice(0, 4).toUpperCase())}</span>`, search: false },
-        { h: 'Pratinjau Butir Soal', k: 'teks', r: (s) => `<div class="clamp2" style="max-width:520px">${esc(s.teks)}</div>${s.gambar ? `<div class="xs ink-p mt4">${I('image', 'ic-sm')} Ada gambar</div>` : ''}<div class="xs muted mt4">${esc(mapelNm(s.mapel_id))}${hasRole('ADMIN') ? ' · ' + esc(s.pembuat) : ''}</div>` },
+    const all = berkasList(list), q = F.q.trim().toLowerCase();
+    const match = (b) => (F.jenis === '*' || b.jenis === F.jenis) && (!F.mapel || b.mapel_id === F.mapel) && (!F.guru || b.pembuat_id === F.guru)
+      && (!q || (b.nama + ' ' + mapelNm(b.mapel_id) + ' ' + (b.pembuat || '') + ' ' + b.kelas_ids.map(kelasShort).join(' ')).toLowerCase().indexOf(q) >= 0);
+    const rows = all.filter(match), nSoal = list.length;
+    const mapels = uniqBy(all, (b) => b.mapel_id).map((b) => b.mapel_id).sort((a, b) => mapelNm(a).localeCompare(mapelNm(b)));
+    const jChips = `<div class="chips">${[['*', 'Semua']].concat(JENIS_BK_L.map((x) => [x[0], JENIS_BK[x[0]]])).map((x) => { const n = all.filter((b) => x[0] === '*' || b.jenis === x[0]).length; return n || x[0] === '*' ? `<button class="chip ${F.jenis === x[0] ? 'on' : ''}" onclick="S.c.bkF.jenis='${x[0]}';rerender()">${esc(x[1])} <span class="cnt">${n}</span></button>` : ''; }).join('')}</div>`;
+    const search = `<div class="input-ic" style="min-width:220px;flex:1;max-width:340px">${I('search')}<input class="input input-sm" id="bkQ" placeholder="Cari berkas, mapel, guru, kelas…" value="${esc(F.q)}"></div>`;
+    const empty = `<div class="card">${emptyState('file-text', all.length ? 'Tidak ada berkas yang cocok' : 'Belum ada berkas soal', all.length ? 'Ubah kata kunci atau saringan.' : 'Import berkas Word/Excel atau buat berkas baru lalu tulis soalnya.', all.length ? '' : `<button class="btn btn-primary" onclick="go('g-import')">${I('upload')}Import Berkas Soal</button>`)}</div>`;
+    let body;
+    if (admin) {
+      const gurus = uniqBy(all, (b) => b.pembuat_id).sort((a, b) => String(a.pembuat).localeCompare(String(b.pembuat)));
+      const stats = [['Berkas soal', all.length, 'file-text', ''], ['Butir soal', nSoal, 'list-check', ''], ['Mapel terisi', mapels.length + '/' + (B().mapel || []).length, 'book', 'ok'], ['Guru penyusun', gurus.length, 'users', 'vio']];
+      const tools = `<div class="card mt16"><div class="flex g12 items-c wrap" style="padding:14px 16px">${search}
+          <select class="select input-sm" style="max-width:200px" onchange="S.c.bkF.mapel=this.value;rerender()"><option value="">Semua mapel</option>${mapels.map((m) => `<option value="${m}" ${F.mapel === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select>
+          <select class="select input-sm" style="max-width:220px" onchange="S.c.bkF.guru=this.value;rerender()"><option value="">Semua guru</option>${gurus.map((g) => `<option value="${g.pembuat_id}" ${F.guru === g.pembuat_id ? 'selected' : ''}>${esc(g.pembuat)}</option>`).join('')}</select>
+          <div class="seg ml-a">${[['berkas', 'Berkas'], ['rekap', 'Rekap per Mapel']].map((x) => `<button type="button" class="${F.view === x[0] ? 'on' : ''}" onclick="S.c.bkF.view='${x[0]}';rerender()">${x[1]}</button>`).join('')}</div></div>
+        <div style="padding:0 16px 14px">${jChips}</div></div>`;
+      if (F.view === 'rekap') {
+        const cols = [['UH', 'UH'], ['UTS', 'PTS'], ['UAS', 'PAS'], ['X', 'Latihan / Umum']];
+        const ms = (B().mapel || []).slice().sort((a, b) => a.nama_mapel.localeCompare(b.nama_mapel)).filter((m) => !F.mapel || m.mapel_id === F.mapel);
+        body = `<div class="card mt16"><div class="card-hd"><h3>${I('table', 'ink-p')} Rekap berkas soal per mapel</h3><span class="small muted">Klik nama berkas untuk membuka</span></div><div class="tbl-wrap"><table class="tbl bk-rekap"><thead><tr><th>Mata pelajaran</th>${cols.map((c) => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>
+          ${ms.map((m) => { const bs = rows.filter((b) => b.mapel_id === m.mapel_id);
+            return `<tr><td><div class="flex items-c g8">${mapelIcon(m.mapel_id, 'sm')}<b class="small">${esc(m.nama_mapel)}</b></div></td>${cols.map((c) => { const xs = bs.filter((b) => c[0] === 'X' ? (b.jenis === 'LATIHAN' || !b.jenis) : b.jenis === c[0]);
+              return `<td>${xs.length ? xs.map((b) => `<a href="javascript:void(0)" class="bk-cell" title="${esc(b.nama)}" onclick="go('g-berkas',{k:'${b.key}'})"><b>${esc(b.pembuat || '-')}</b><span>${b.kelas_ids.map(kelasShort).join(', ') || 'kelas ?'} · ${b.soal.length} soal</span></a>`).join('') : `<span class="bk-none ${c[0] === 'UTS' || c[0] === 'UAS' ? 'req' : ''}">${c[0] === 'UTS' || c[0] === 'UAS' ? 'Belum ada' : '—'}</span>`}</td>`; }).join('')}</tr>`; }).join('')}
+        </tbody></table></div></div>`;
+      } else {
+        const grp = mapels.filter((m) => rows.some((b) => b.mapel_id === m));
+        body = grp.length ? grp.map((m) => { const bs = rows.filter((b) => b.mapel_id === m);
+          return `<section class="bk-sec"><div class="bk-sec-hd">${mapelIcon(m, 'sm')}<h3>${esc(mapelNm(m))}</h3><span class="small muted">${bs.length} berkas · ${sum(bs.map((b) => b.soal.length))} soal · ${uniqBy(bs, (b) => b.pembuat_id).length} guru</span></div><div class="bk-grid">${bs.map((b) => berkasCard(b, true)).join('')}</div></section>`; }).join('') : `<div class="mt16">${empty}</div>`;
+      }
+      return `<div class="page">${head}<div class="grid gc4">${stats.map((x) => `<div class="card stat"><div><div class="lbl">${x[0]}</div><div class="val">${x[1]}</div></div><div class="tile ${x[3]}">${I(x[2])}</div></div>`).join('')}</div>${tools}${body}</div>`;
+    }
+    // ── Guru: per kelas ──
+    const pens = G().penugasan, kls = uniqBy(pens, (x) => x.kelas_id).map((x) => x.kelas_id);
+    const inK = (b, k) => k === '-' ? !b.kelas_ids.length : b.kelas_ids.indexOf(k) >= 0;
+    const secK = kls.filter((k) => rows.some((b) => inK(b, k))).concat(rows.some((b) => !b.kelas_ids.length || !b.kelas_ids.some((k) => kls.indexOf(k) >= 0)) ? ['-'] : []);
+    const show = F.kelas ? secK.filter((k) => k === F.kelas) : secK;
+    const kChips = `<div class="chips">${[['', 'Semua kelas', all.length]].concat(kls.map((k) => [k, kelasShort(k), all.filter((b) => inK(b, k)).length])).map((x) => `<button class="chip ${F.kelas === x[0] ? 'on' : ''}" onclick="S.c.bkF.kelas='${x[0]}';rerender()">${esc(x[1])} <span class="cnt">${x[2]}</span></button>`).join('')}</div>`;
+    body = show.length ? show.map((k) => { const bs = rows.filter((b) => k === '-' ? !b.kelas_ids.length || !b.kelas_ids.some((x) => kls.indexOf(x) >= 0) : inK(b, k));
+      return `<section class="bk-sec"><div class="bk-sec-hd"><span class="tile sm">${I(k === '-' ? 'file' : 'door')}</span><h3>${k === '-' ? 'Belum diatur kelasnya' : 'Kelas ' + esc(kelasNm(k))}</h3><span class="small muted">${bs.length} berkas · ${sum(bs.map((b) => b.soal.length))} soal</span></div><div class="bk-grid">${bs.map((b) => berkasCard(b, false)).join('')}</div></section>`; }).join('') : `<div class="mt16">${empty}</div>`;
+    return `<div class="page">${head}<div class="card"><div class="flex g12 items-c wrap" style="padding:14px 16px">${search}<span class="small muted ml-a">${all.length} berkas · ${nSoal} butir soal</span></div><div style="padding:0 16px 10px">${kChips}</div><div style="padding:0 16px 14px">${jChips}</div></div>${body}</div>`;
+  },
+  mount() { const q = $('#bkQ'); if (q) q.oninput = debounce(() => { S.c.bkF.q = q.value; const pos = q.selectionStart; rerender(); const n = $('#bkQ'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) { /* abaikan */ } } }, 250); }
+});
+/** Detail berkas: daftar butir soal di dalamnya + aksi (buat ujian, tambah/import soal, unduh, ubah, hapus). */
+route('g-berkas', {
+  title: 'Berkas Soal', roles: ['GURU', 'ADMIN'], back: 'g-bank', nav: 'g-bank',
+  render(p) {
+    const list = soalList(); if (!list) return skelPage();
+    const b = berkasList(list).find((x) => x.key === p.k);
+    const backBtn = `<button class="back-link" onclick="back('g-bank')">${I('arrow-l', 'ic-sm')}Kembali ke Bank Soal</button>`;
+    if (!b) return `<div class="page">${backBtn}<div class="card">${emptyState('file-text', 'Berkas tidak ditemukan', 'Berkas mungkin sudah dihapus atau namanya diubah.', `<button class="btn btn-primary" onclick="go('g-bank')">Ke Bank Soal</button>`)}</div></div>`;
+    const ulBy = {}; (G().ulangan || []).forEach((u) => { ulBy[u.ulangan_id] = u; });
+    const uls = Object.keys(b.ul).map((id) => ulBy[id]).filter(Boolean);
+    const own = hasRole('ADMIN') || b.pembuat_id === me().user_id;
+    return `<div class="page">${backBtn}
+      <div class="card bk-hero"><div class="flex g16 items-s wrap"><span class="bk-ic lg mp${hashN(b.mapel_id) % 6}">${I('file-text')}<b>${b.soal.length}</b></span>
+        <div class="f1" style="min-width:220px"><div class="flex items-c g8 wrap">${bkJenisPill(b.jenis)}<span class="pill pill-info">${esc(mapelNm(b.mapel_id))}</span>${hasRole('ADMIN') ? `<span class="small muted">${I('user', 'ic-sm')} ${esc(b.pembuat || '')}</span>` : ''}</div>
+          <h1 class="mt8" style="font-size:22px">${esc(b.nama)}</h1><div class="bk-kls mt8">${bkKelas(b.kelas_ids, 12)}</div>
+          <p class="small muted mt8">${b.soal.length} butir · total skor ${fmtN(b.skor)} · PG ${b.tipe.PG} · MCMA ${b.tipe.MCMA} · Benar/Salah ${b.tipe.KATEGORI} · Esai ${b.tipe.ESAI}</p>
+          ${uls.length ? `<p class="small mt8">${I('exam', 'ic-sm ink-p')} Dipakai di: ${uls.map((u) => `<a href="javascript:void(0)" class="ink-p bold" onclick="go('g-ujian-form',{id:'${u.ulangan_id}'})">${esc(u.judul)}</a>`).join(', ')}</p>` : ''}</div>
+        ${own ? `<div class="flex g8 wrap"><button class="btn btn-ghost btn-sm" onclick="openBerkasForm('${b.key}')">${I('edit', 'ic-sm')}Ubah info</button><button class="btn btn-ghost btn-sm ink-err" onclick="delBerkas('${b.key}')">${I('trash', 'ic-sm')}Hapus</button></div>` : ''}</div>
+        ${b.legacy ? `<div class="banner banner-info mt16">${I('info')}<div class="small">Berkas ini dikelompokkan otomatis dari soal lama berdasarkan ujian yang memakainya. Klik <b>Ubah info</b> untuk memberi nama, kelas, dan jenis penilaian yang tepat.</div></div>` : ''}
+        <div class="flex g8 wrap mt16"><button class="btn btn-primary" ${b.soal.length ? '' : 'disabled'} onclick="go('g-ujian-form',{berkas:'${b.key}'})">${I('send')}Buat Ujian dari Berkas Ini</button>
+          ${own ? `<button class="btn btn-secondary" onclick="berkasAddSoal('${b.key}')">${I('plus')}Tulis Soal</button><button class="btn btn-secondary" onclick="berkasImport('${b.key}')">${I('upload')}Import ke Berkas</button>` : ''}
+          <button class="btn btn-ghost" ${b.soal.length ? '' : 'disabled'} onclick="exportBerkas('${b.key}')">${I('download')}Unduh Excel</button></div></div>
+      ${b.soal.length && window.innerWidth < 768 ? `<div class="card mt16 bk-list">${b.soal.map((s, i) => `<div class="bk-q" onclick="openSoalEditor('${s.soal_id}')" role="button"><span class="bk-qn">${i + 1}</span><div class="f1" style="min-width:0"><div class="flex items-c g6 wrap">${pill(TIPE_SOAL[s.tipe].replace('PG Kompleks ', ''), s.tipe === 'ESAI' ? 'vio' : 'info')}<span class="xs muted mono">Kunci ${esc(String(fmtKunci(s.kunci)).slice(0, 20))} · ${fmtN(s.skor_maks)} poin</span>${s.gambar ? `<span class="xs ink-p">${I('image', 'ic-sm')}</span>` : ''}</div><div class="small mt4 bk-qt">${esc(s.teks)}</div></div>
+          ${own ? `<div class="col g4"><button class="icon-btn" onclick="event.stopPropagation();dupSoal('${s.soal_id}')" title="Duplikat">${I('copy')}</button><button class="icon-btn ink-err" onclick="event.stopPropagation();delSoal('${s.soal_id}')" title="Hapus">${I('trash')}</button></div>` : ''}</div>`).join('')}</div>`
+      : b.soal.length ? `<div class="card mt16">${dataTable('bk_' + b.key, b.soal, [
+        { h: 'No', k: 'dibuat_pada', n: true, r: (s) => `<span class="mono bold small">${b.soal.indexOf(s) + 1}</span>`, search: false },
+        { h: 'Butir soal', k: 'teks', r: (s) => `<div class="clamp2" style="max-width:560px">${esc(s.teks)}</div>${s.gambar ? `<div class="xs ink-p mt4">${I('image', 'ic-sm')} Ada gambar</div>` : ''}` },
         { h: 'Tipe', k: 'tipe', r: (s) => pill(TIPE_SOAL[s.tipe].replace('PG Kompleks ', ''), s.tipe === 'ESAI' ? 'vio' : 'info') },
+        { h: 'Kunci', k: 'kunci', sort: false, r: (s) => `<span class="mono small">${esc(String(fmtKunci(s.kunci)).slice(0, 24))}</span>`, search: false },
         { h: 'Skor', k: 'skor_maks', n: true, r: (s) => `<span class="mono">${fmtN(s.skor_maks)}</span>` },
-        { h: 'Penggunaan', k: 'dipakai', v: (s) => s.dipakai.length, r: (s) => s.dipakai.length ? `<span class="pill pill-ok">${I('check', 'ic-sm')}${s.dipakai.length} ulangan</span>` : '<span class="xs muted">Belum dipakai</span>' },
-        { h: '', sort: false, r: (s) => `<div class="flex g4 jc-e"><button class="icon-btn" onclick="event.stopPropagation();openSoalEditor('${s.soal_id}')" title="Ubah">${I('edit')}</button><button class="icon-btn" onclick="event.stopPropagation();dupSoal('${s.soal_id}')" title="Duplikat">${I('copy')}</button><button class="icon-btn ink-err" onclick="event.stopPropagation();delSoal('${s.soal_id}')" title="Hapus">${I('trash')}</button></div>` }
-      ], { ph: 'Cari teks soal…', onRow: (s) => `openSoalEditor('${s.soal_id}')`, emptyT: 'Belum ada soal', emptyD: 'Buat soal baru atau import dari Excel.' })}</div></div>`;
+        { h: '', sort: false, r: (s) => own ? `<div class="flex g4 jc-e"><button class="icon-btn" onclick="event.stopPropagation();openSoalEditor('${s.soal_id}')" title="Ubah">${I('edit')}</button><button class="icon-btn" onclick="event.stopPropagation();dupSoal('${s.soal_id}')" title="Duplikat">${I('copy')}</button><button class="icon-btn ink-err" onclick="event.stopPropagation();delSoal('${s.soal_id}')" title="Hapus">${I('trash')}</button></div>` : '' }
+      ], { ph: 'Cari di berkas ini…', onRow: (s) => `openSoalEditor('${s.soal_id}')`, emptyT: 'Tidak ada soal', emptyD: '' })}</div>`
+      : `<div class="card mt16">${emptyState('file-text', 'Berkas masih kosong', 'Import soal dari Word/Excel atau tulis soal satu per satu.', own ? `<div class="flex g8 wrap" style="justify-content:center"><button class="btn btn-primary" onclick="berkasImport('${b.key}')">${I('upload')}Import ke Berkas</button><button class="btn btn-secondary" onclick="berkasAddSoal('${b.key}')">${I('plus')}Tulis Soal</button></div>` : '')}</div>`}</div>`;
   }
 });
-function openSoalEditor(id, base) {
+const bkFind = (key) => berkasList(soalList() || []).find((x) => x.key === key);
+const bkInfo = (b) => ({ berkas_id: b.berkas_id, nama_berkas: b.nama, kelas_ids: b.kelas_ids, jenis: b.jenis });
+/** Kelas yang boleh dipilih untuk berkas: guru → kelas yang diajar pada mapel itu; admin → semua kelas. */
+function bkKelasOpts(mapel) {
+  if (hasRole('ADMIN')) return (B().kelas || []).map((k) => k.kelas_id);
+  const ks = uniqBy(G().penugasan.filter((x) => !mapel || x.mapel_id === mapel), (x) => x.kelas_id).map((x) => x.kelas_id);
+  return ks.length ? ks : uniqBy(G().penugasan, (x) => x.kelas_id).map((x) => x.kelas_id);
+}
+function bkMapelOpts() { const ms = uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id); if (hasRole('ADMIN')) (B().mapel || []).forEach((m) => { if (ms.indexOf(m.mapel_id) < 0) ms.push(m.mapel_id); }); return ms; }
+/** Beri label berkas pada soal lama (berkas otomatis) agar bisa ditambah soal / diimpor. */
+function bkEnsure(b) {
+  if (b.berkas_id) return Promise.resolve(b);
+  return call('berkas.save', Object.assign(bkInfo(b), { soal_ids: b.soal.map((s) => s.soal_id), mapel_id: b.mapel_id })).then((r) => { bkApply(r.soal); return bkFind('B:' + r.berkas_id); });
+}
+function bkApply(rows) { const l = S.c.soal && S.c.soal.d; if (!l) return; const by = {}; rows.forEach((x) => { by[x.soal_id] = x; }); l.forEach((x, i) => { if (by[x.soal_id]) { l[i] = by[x.soal_id]; delete by[x.soal_id]; } }); Object.keys(by).forEach((k) => l.unshift(by[k])); }
+/** Form buat / ubah info berkas. */
+function openBerkasForm(key) {
+  const b = key ? bkFind(key) : null, ms = bkMapelOpts();
+  const E = { nama: b ? b.nama : '', mapel: b ? b.mapel_id : (S.c.bkF && S.c.bkF.mapel) || ms[0] || '', jenis: b ? b.jenis : 'UTS', kelas: b ? b.kelas_ids.slice() : (S.c.bkF && S.c.bkF.kelas && S.c.bkF.kelas !== '-' ? [S.c.bkF.kelas] : []) };
+  const draw = (el) => {
+    const opts = bkKelasOpts(E.mapel);
+    $('#bfKelas', el).innerHTML = opts.map((k) => `<button type="button" class="chip ${E.kelas.indexOf(k) >= 0 ? 'sel-o' : ''}" data-k="${k}">${E.kelas.indexOf(k) >= 0 ? I('check', 'ic-sm') : ''}${esc(kelasShort(k))}</button>`).join('') || '<span class="small muted">Belum ada kelas untuk mapel ini.</span>';
+  };
+  sheet({ title: b ? 'Ubah Info Berkas' : 'Buat Berkas Soal', icon: 'file-text', body: `<form class="col g16" id="bfForm" onsubmit="return false">
+      <div class="field"><label class="label">Nama berkas <span class="req">*</span></label><input class="input" id="bfNama" maxlength="150" value="${esc(E.nama)}" placeholder="Contoh: PTS Ganjil B. Inggris Kelas XII"></div>
+      <div class="field"><label class="label">Mata pelajaran</label><select class="select" id="bfMapel">${ms.map((m) => `<option value="${m}" ${E.mapel === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select></div>
+      <div class="field"><label class="label">Jenis penilaian</label><div class="seg wrap" id="bfJenis">${JENIS_BK_L.map((x) => `<button type="button" data-v="${x[0]}" class="${E.jenis === x[0] ? 'on' : ''}">${x[1]}</button>`).join('')}</div></div>
+      <div class="field"><label class="label">Untuk kelas</label><div class="chips" id="bfKelas"></div><div class="help">Boleh lebih dari satu kelas.</div></div></form>`,
+    foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-primary" id="bfSave">${I('check')}${b ? 'Simpan' : 'Buat Berkas'}</button>`,
+    mount: (el, close) => {
+      el.querySelector('[data-x2]').onclick = close; draw(el);
+      $('#bfMapel', el).onchange = (e) => { E.mapel = e.target.value; const ok = bkKelasOpts(E.mapel); E.kelas = E.kelas.filter((k) => ok.indexOf(k) >= 0); draw(el); };
+      $('#bfJenis', el).onclick = (e) => { const x = e.target.closest('button'); if (!x) return; E.jenis = x.dataset.v; $$('#bfJenis button', el).forEach((y) => y.classList.toggle('on', y === x)); };
+      $('#bfKelas', el).onclick = (e) => { const x = e.target.closest('[data-k]'); if (!x) return; const i = E.kelas.indexOf(x.dataset.k); if (i >= 0) E.kelas.splice(i, 1); else E.kelas.push(x.dataset.k); draw(el); };
+      $('#bfSave', el).onclick = () => {
+        E.nama = $('#bfNama', el).value.trim();
+        if (!E.nama) { toast('Nama berkas wajib diisi.', 'warn'); return; }
+        if (!b || b.draft) {   // berkas baru: dibuat saat soal pertama disimpan
+          const id = b ? b.berkas_id : bkId(), k = 'B:' + id;
+          S.c.bkDraft = S.c.bkDraft || {}; S.c.bkDraft[k] = { key: k, berkas_id: id, nama: E.nama, mapel_id: E.mapel, kelas_ids: E.kelas, jenis: E.jenis, pembuat_id: me().user_id, pembuat: me().nama, t: now() };
+          close(); go('g-berkas', { k }, b ? { replace: true } : {}); return;
+        }
+        const btn = $('#bfSave', el); btnBusy(btn, true, 'Menyimpan…');
+        call('berkas.save', { berkas_id: b.berkas_id, soal_ids: b.berkas_id ? [] : b.soal.map((s) => s.soal_id), nama_berkas: E.nama, kelas_ids: E.kelas, jenis: E.jenis, mapel_id: E.mapel }).then((r) => {
+          bkApply(r.soal); close(); toast('Info berkas disimpan.', 'ok'); go('g-berkas', { k: 'B:' + r.berkas_id }, { replace: true });
+        }).catch((e) => { btnBusy(btn, false); failToast(e); });
+      };
+    } });
+}
+function delBerkas(key) {
+  const b = bkFind(key); if (!b) return;
+  if (b.draft) { delete S.c.bkDraft[key]; go('g-bank', {}, { replace: true }); return; }
+  confirmBox(`Hapus berkas <b>${esc(b.nama)}</b> beserta <b>${b.soal.length} soal</b> di dalamnya? Tindakan ini tidak bisa dibatalkan.`, { danger: true, yes: 'Hapus Berkas', title: 'Hapus berkas soal?' }).then((ok) => {
+    if (!ok) return;
+    call('berkas.delete', b.berkas_id ? { berkas_id: b.berkas_id } : { soal_ids: b.soal.map((s) => s.soal_id) }).then(() => {
+      const del = {}; b.soal.forEach((s) => { del[s.soal_id] = 1; }); S.c.soal.d = S.c.soal.d.filter((s) => !del[s.soal_id]);
+      toast('Berkas dihapus.', 'ok'); go('g-bank', {}, { replace: true });
+    }).catch(failToast);
+  });
+}
+function berkasAddSoal(key) { const b = bkFind(key); if (!b) return; (b.draft ? Promise.resolve(b) : bkEnsure(b)).then((x) => openSoalEditor(null, null, x)).catch(failToast); }
+function berkasImport(key) { const b = bkFind(key); if (!b) return; (b.draft ? Promise.resolve(b) : bkEnsure(b)).then((x) => { S.c.imp = null; go('g-import', { k: x.key }); }).catch(failToast); }
+/** Unduh berkas sebagai Excel (format sama dengan template import, bisa diimpor ulang). */
+function exportBerkas(key) {
+  const b = bkFind(key); if (!b) return;
+  const rows = b.soal.map((s) => {
+    const o = s.opsi || {}, k = s.kunci;
+    if (s.tipe === 'KATEGORI') return ['KATEGORI', [s.teks].concat(o.pernyataan || []).join(' | '), ...(o.kategori || []).concat(['', '', '', '', '']).slice(0, 5), (k || []).join(' | '), s.skor_maks, s.mode_skor, s.gambar_url || ''];
+    if (s.tipe === 'ESAI') return ['ESAI', s.teks, o.rubrik || '', '', '', '', '', (k && k.acuan) || '', s.skor_maks, '', s.gambar_url || ''];
+    return [s.tipe, s.teks, o.A || '', o.B || '', o.C || '', o.D || '', o.E || '', Array.isArray(k) ? k.join(', ') : k || '', s.skor_maks, s.mode_skor, s.gambar_url || ''];
+  });
+  exportXlsx(('Berkas_' + b.nama).replace(/[^\w]+/g, '_').slice(0, 60), [{ name: 'Soal', rows: [IMPORT_COLS].concat(rows) },
+    { name: 'Info', rows: [['Nama berkas', b.nama], ['Mapel', mapelNm(b.mapel_id)], ['Jenis', JENIS_BK[b.jenis || '']], ['Kelas', b.kelas_ids.map(kelasNm).join(', ')], ['Guru', b.pembuat || ''], ['Jumlah soal', b.soal.length]] }]);
+}
+function openSoalEditor(id, base, bk) {
   const list = (S.c.soal && S.c.soal.d) || [];
-  const s = base || (id ? list.find((x) => x.soal_id === id) : null) || { tipe: 'PG', skor_maks: 10, mode_skor: 'PROPORSIONAL', opsi: { A: '', B: '', C: '', D: '', E: '' }, kunci: '', mapel_id: S.c.bankF && S.c.bankF.mapel || (G().penugasan[0] || {}).mapel_id };
+  const s = base || (id ? list.find((x) => x.soal_id === id) : null) || { tipe: 'PG', skor_maks: 10, mode_skor: 'PROPORSIONAL', opsi: { A: '', B: '', C: '', D: '', E: '' }, kunci: '', mapel_id: bk ? bk.mapel_id : (G().penugasan[0] || {}).mapel_id };
+  if (!bk && base && base.berkas_id) bk = bkFind('B:' + base.berkas_id);
+  const bkNew = !(id && !base) && bk ? bkInfo(bk) : null;
   const E = S.c.sEd = { id: base ? null : id, tipe: s.tipe, gambar: s.gambar || '', kat: (s.opsi && s.opsi.kategori) || ['Benar', 'Salah'], pern: (s.opsi && s.opsi.pernyataan) || ['', ''], kunciK: s.tipe === 'KATEGORI' ? (s.kunci || []) : [], s };
   const mapels = uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id);
   if (hasRole('ADMIN')) (B().mapel || []).forEach((m) => { if (mapels.indexOf(m.mapel_id) < 0) mapels.push(m.mapel_id); });
   sheet({ title: id && !base ? 'Detail & Edit Soal' : 'Soal Baru', icon: 'list-check', size: 'drawer', body: `<form id="sForm" class="col g16" onsubmit="return false">
-      <div class="field"><label class="label">Mata pelajaran</label><select class="select" name="mapel_id">${mapels.map((m) => `<option value="${m}" ${s.mapel_id === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select></div>
+      ${bkNew ? `<div class="info-tile">${I('file-text', 'ink-p')}<div class="f1 small">Disimpan ke berkas <b>${esc(bkNew.nama_berkas)}</b></div></div>` : ''}
+      <div class="field"><label class="label">Mata pelajaran</label><select class="select" name="mapel_id" ${bkNew ? 'disabled' : ''}>${mapels.concat(bkNew && mapels.indexOf(s.mapel_id) < 0 ? [s.mapel_id] : []).map((m) => `<option value="${m}" ${s.mapel_id === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select></div>
       <div class="field"><label class="label">Tipe soal</label><div class="seg w100" id="sTipe">${Object.keys(TIPE_SOAL).map((k) => `<button type="button" data-v="${k}" class="${s.tipe === k ? 'on' : ''}">${k === 'KATEGORI' ? 'Kategori' : k === 'MCMA' ? 'MCMA' : k === 'PG' ? 'PG' : 'Esai'}</button>`).join('')}</div></div>
       <div class="field"><label class="label">Teks pertanyaan <span class="req">*</span></label><textarea class="textarea" name="teks" style="min-height:140px" placeholder="Tulis soal. Rumus bisa ditulis biasa, mis. F = m · a">${esc(s.teks || '')}</textarea></div>
       <div class="field"><label class="label">Gambar / stimulus (opsional)</label><div id="sImg"></div></div>
@@ -353,7 +520,8 @@ function openSoalEditor(id, base) {
     drawBody(); drawImg();
     $('#sTipe', el).onclick = (e) => { const b = e.target.closest('button'); if (!b) return; E.tipe = b.dataset.v; $$('#sTipe button', el).forEach((x) => x.classList.toggle('on', x === b)); drawBody(); };
     $('#sSave', el).onclick = () => {
-      const d = formData(f), t = E.tipe, p2 = { soal_id: E.id, mapel_id: d.mapel_id, tipe: t, teks: d.teks, skor_maks: num(d.skor_maks), mode_skor: d.mode_skor, gambar: E.gambar };
+      const d = formData(f), t = E.tipe, p2 = { soal_id: E.id, mapel_id: bkNew ? s.mapel_id : d.mapel_id, tipe: t, teks: d.teks, skor_maks: num(d.skor_maks), mode_skor: d.mode_skor, gambar: E.gambar };
+      if (bkNew) p2.berkas = bkNew;
       if (t === 'PG' || t === 'MCMA') { p2.opsi = {}; ['A', 'B', 'C', 'D', 'E'].forEach((L) => { p2.opsi[L] = d['opsi_' + L]; }); p2.kunci = t === 'PG' ? d.kunci : $$('[name=kunci]:checked', el).map((x) => x.value); }
       else if (t === 'KATEGORI') { E.pern = $$('[data-pern]', el).map((x) => x.value); E.kunciK = $$('[data-kun]', el).map((x) => x.value); p2.opsi = { kategori: E.kat, pernyataan: E.pern.filter((x) => x.trim()) }; p2.kunci = E.kunciK.slice(0, p2.opsi.pernyataan.length); }
       else { p2.opsi = { rubrik: d.rubrik }; p2.kunci = { acuan: d.acuan }; }
@@ -361,6 +529,7 @@ function openSoalEditor(id, base) {
       const btn = $('#sSave', el); btnBusy(btn, true, 'Menyimpan…');
       call('soal.save', p2).then((r) => {
         const l = S.c.soal && S.c.soal.d; if (l) { const i = l.findIndex((x) => x.soal_id === r.soal_id); if (i >= 0) l[i] = r; else l.unshift(r); }
+        if (r.berkas_id && S.c.bkDraft) delete S.c.bkDraft['B:' + r.berkas_id];
         close(); toast('Soal tersimpan.', 'ok'); rerender();
       }).catch((e) => { btnBusy(btn, false); failToast(e); });
     };
@@ -378,10 +547,14 @@ function delSoal(id) {
 const IMPORT_COLS = ['tipe', 'soal', 'opsi_A', 'opsi_B', 'opsi_C', 'opsi_D', 'opsi_E', 'kunci', 'skor', 'mode_skor', 'gambar'];
 route('g-import', {
   title: 'Import Soal', roles: ['GURU', 'ADMIN'], back: 'g-bank', nav: 'g-bank',
-  render() {
-    const W = S.c.imp || (S.c.imp = { step: 1, mapel: (G().penugasan[0] || {}).mapel_id, items: null, res: null, file: '', extra: {}, warn: [] });
-    const mapels = uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id);
-    if (hasRole('ADMIN')) (B().mapel || []).forEach((m) => { if (mapels.indexOf(m.mapel_id) < 0) mapels.push(m.mapel_id); });
+  render(p) {
+    const list = soalList(); if (!list) return skelPage();
+    const W = S.c.imp || (S.c.imp = { step: 1, mapel: (G().penugasan[0] || {}).mapel_id, items: null, res: null, file: '', extra: {}, warn: [], bk: { mode: p.k ? 'ada' : 'baru', key: p.k || '', nama: '', jenis: 'UTS', kelas: [] } });
+    const mapels = bkMapelOpts(); if (!W.mapel) W.mapel = mapels[0];
+    const mine = berkasList(list).filter((b) => hasRole('ADMIN') || b.pembuat_id === me().user_id), BK = W.bk;
+    const tgt = BK.mode === 'ada' ? mine.find((b) => b.key === BK.key) : null;
+    if (tgt) W.mapel = tgt.mapel_id;
+    const kOpts = bkKelasOpts(W.mapel);
     const step = (n, t) => `<div class="card" style="padding:14px 16px;flex:1;min-width:200px;${W.step === n ? 'background:var(--p600);color:#fff;border-color:var(--p600)' : W.step > n ? 'background:var(--ok-t);border-color:rgba(22,163,74,.3)' : ''}"><div class="flex items-c g12"><span class="tile sm" style="${W.step === n ? 'background:#fff;color:var(--p600)' : W.step > n ? 'background:var(--ok);color:#fff' : ''}">${W.step > n ? I('check') : n}</span><div><div class="xs bold upper" style="opacity:.8">Langkah ${n}${W.step === n ? ' (aktif)' : ''}</div><div class="bold">${t}</div></div></div></div>`;
     const res = W.res, nImg = res ? res.valid.filter((v) => (W.items[v.i] || {}).img).length : 0, nExtra = Object.keys(W.extra || {}).length;
     const thumb = (it) => it && it.img ? `<img class="imp-thumb" src="${impThumb(it)}" alt="" onclick="event.stopPropagation();impZoom(${W.items.indexOf(it)})">` : it && it.imgErr ? `<span class="xs ink-warn" title="${esc(it.imgErr)}">${I('alert', 'ic-sm')} gambar dilewati</span>` : '<span class="xs muted">—</span>';
@@ -390,7 +563,12 @@ route('g-import', {
       <div class="flex g12 wrap">${step(1, 'Unduh Template')}${step(2, 'Unggah Berkas')}${step(3, 'Pratinjau & Simpan')}</div>
       <div class="split mt16"><div class="col g16">
         <div class="card card-p"><h3>${I('upload', 'ink-p')} Unggah berkas soal</h3>
-          <div class="field mt12"><label class="label">Mapel tujuan</label><select class="select" onchange="S.c.imp.mapel=this.value">${mapels.map((m) => `<option value="${m}" ${W.mapel === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select></div>
+          <div class="field mt12"><label class="label">Simpan ke berkas</label><div class="seg w100">${[['baru', 'Berkas baru'], ['ada', 'Berkas yang sudah ada']].map((x) => `<button type="button" class="${BK.mode === x[0] ? 'on' : ''}" onclick="S.c.imp.bk.mode='${x[0]}';rerender()" ${x[0] === 'ada' && !mine.length ? 'disabled' : ''}>${x[1]}</button>`).join('')}</div></div>
+          ${BK.mode === 'ada' ? `<div class="field mt12"><label class="label">Pilih berkas</label><select class="select" onchange="S.c.imp.bk.key=this.value;S.c.imp.res=null;rerender()"><option value="">— pilih berkas —</option>${mine.map((b) => `<option value="${b.key}" ${BK.key === b.key ? 'selected' : ''}>${esc(b.nama)} — ${esc(mapelNm(b.mapel_id))} (${b.soal.length} soal)</option>`).join('')}</select>${tgt ? `<div class="bk-kls mt8">${bkJenisPill(tgt.jenis)}${bkKelas(tgt.kelas_ids, 8)}</div>` : ''}</div>`
+          : `<div class="field mt12"><label class="label">Nama berkas <span class="req">*</span></label><input class="input" value="${esc(BK.nama)}" placeholder="Contoh: PTS Ganjil B. Inggris Kelas XII" oninput="S.c.imp.bk.nama=this.value"></div>
+          <div class="form-grid c2 mt12"><div class="field"><label class="label">Mapel</label><select class="select" onchange="S.c.imp.mapel=this.value;S.c.imp.bk.kelas=[];S.c.imp.res=null;rerender()">${mapels.map((m) => `<option value="${m}" ${W.mapel === m ? 'selected' : ''}>${esc(mapelNm(m))}</option>`).join('')}</select></div>
+            <div class="field"><label class="label">Jenis penilaian</label><select class="select" onchange="S.c.imp.bk.jenis=this.value">${JENIS_BK_L.map((x) => `<option value="${x[0]}" ${BK.jenis === x[0] ? 'selected' : ''}>${x[1]}</option>`).join('')}</select></div></div>
+          <div class="field mt12"><label class="label">Untuk kelas</label><div class="chips">${kOpts.map((k) => `<button type="button" class="chip ${BK.kelas.indexOf(k) >= 0 ? 'sel-o' : ''}" onclick="impKelas('${k}')">${BK.kelas.indexOf(k) >= 0 ? I('check', 'ic-sm') : ''}${esc(kelasShort(k))}</button>`).join('') || '<span class="small muted">Tidak ada kelas.</span>'}</div></div>`}
           <label class="upload mt12" id="impDrop">${I('file-text', 'ic-lg')}<div class="bold mt8">${W.file ? esc(W.file) : 'Pilih berkas Word (.docx) atau Excel (.xlsx, .csv)'}</div><div class="small muted">Gambar yang ditempel di dalam berkas ikut terbaca</div><input type="file" hidden accept=".docx,.xlsx,.xls,.csv" onchange="impFile(this.files[0]);this.value=''"></label>
           <label class="btn btn-ghost btn-sm mt8" style="cursor:pointer">${I('image', 'ic-sm')}${nExtra ? nExtra + ' gambar tambahan dipilih' : 'Gambar terpisah (opsional)'}<input type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp" multiple onchange="impExtra(this.files);this.value=''"></label>
           <p class="help">Pakai "gambar terpisah" bila kolom <b>gambar</b> di Excel berisi nama berkas, misalnya <span class="mono">grafik1.png</span>.</p>
@@ -411,16 +589,18 @@ route('g-import', {
           <a class="btn btn-secondary btn-block mt12" href="templates/template-soal-cbt.xlsx" download onclick="S.c.imp.step=Math.max(S.c.imp.step,2);setTimeout(rerender,50)">${I('table')}Template Excel (.xlsx)</a>
           <ul class="small tx2" style="padding-left:18px;margin:14px 0 0;line-height:1.8"><li><b>Tipe</b>: PG, MCMA (PG kompleks), KATEGORI (benar–salah), ESAI</li><li>Kunci MCMA: <span class="mono">A, C</span> · benar–salah: <span class="mono">Benar, Salah</span></li><li>Gambar otomatis diperkecil & disimpan di Drive sekolah</li><li>Format gambar: PNG atau JPG, satu gambar per soal</li></ul></div>
         <div class="card card-p"><div class="flex items-c g8">${I('shield', 'ink-ok')}<b>Proteksi integritas</b></div><p class="small tx2 mt8">Soal bermasalah dilewati otomatis sehingga tidak masuk ke bank soal. Perbaiki di berkas lalu unggah ulang.</p></div></div></div>
-      ${res && res.valid.length ? `<div class="sticky-bar"><span class="small muted f1">${res.valid.length} soal valid${nImg ? ' (' + nImg + ' bergambar)' : ''} akan disimpan ke ${esc(mapelNm(W.mapel))}.</span><button class="btn btn-ghost" onclick="S.c.imp=null;rerender()">Batal / Unggah Ulang</button><button class="btn btn-primary btn-lg" id="impSave" onclick="impSave()">${I('cloud-ok')}Simpan ${res.valid.length} Soal ke Bank Soal${I('arrow-r')}</button></div>` : ''}</div>`;
+      ${res && res.valid.length ? `<div class="sticky-bar"><span class="small muted f1">${res.valid.length} soal valid${nImg ? ' (' + nImg + ' bergambar)' : ''} akan disimpan ke berkas <b>${esc(tgt ? tgt.nama : BK.nama || '(isi nama berkas)')}</b> · ${esc(mapelNm(W.mapel))}.</span><button class="btn btn-ghost" onclick="S.c.imp=null;rerender()">Batal / Unggah Ulang</button><button class="btn btn-primary btn-lg" id="impSave" onclick="impSave()">${I('cloud-ok')}Simpan ${res.valid.length} Soal ke Bank Soal${I('arrow-r')}</button></div>` : ''}</div>`;
   }
 });
 function fmtKunci(k) { try { const v = typeof k === 'string' ? JSON.parse(k) : k; return Array.isArray(v) ? v.join(v.some((x) => String(x).length > 1) ? ' | ' : ',') : v && v.acuan !== undefined ? 'Rubrik guru' : String(v); } catch (e) { return String(k); } }
 function impThumb(it) { if (!it.thumb) it.thumb = URL.createObjectURL(it.img); return it.thumb; }
 function impZoom(i) { const it = S.c.imp.items[i]; if (!it || !it.img) return; sheet({ title: esc(it.ref || 'Gambar soal'), size: 'wide', body: `<img src="${impThumb(it)}" alt="" style="width:100%;border-radius:12px;background:#fff">` }); }
 /** Baca berkas: Word & Excel memakai pembaca bawaan (dengan gambar); CSV/XLS lama lewat pembaca tabel. */
+function impKelas(k) { const K = S.c.imp.bk.kelas, i = K.indexOf(k); if (i >= 0) K.splice(i, 1); else K.push(k); rerender(); }
 async function impFile(file) {
   if (!file) return;
-  const W = S.c.imp; W.file = file.name; W.res = null; W.warn = []; W.busy = 'Membaca berkas ' + file.name + '…'; rerender();
+  const W = S.c.imp; W.file = file.name;
+  if (W.bk.mode === 'baru' && !W.bk.nama.trim()) W.bk.nama = file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim().slice(0, 150); W.res = null; W.warn = []; W.busy = 'Membaca berkas ' + file.name + '…'; rerender();
   try {
     let parsed;
     if (/\.docx$/i.test(file.name)) parsed = await parseDocxSoal(file);
@@ -462,45 +642,82 @@ function impRowOut(it, gid) {
 }
 async function impSave() {
   const W = S.c.imp, btn = $('#impSave'), okIdx = {}; W.res.valid.forEach((v) => { okIdx[v.i] = 1; });
+  let bk;
+  if (W.bk.mode === 'ada') { const t = bkFind(W.bk.key); if (!t) { toast('Pilih berkas tujuan terlebih dahulu.', 'warn'); return; } bk = t; W.mapel = t.mapel_id; }
+  else { if (!W.bk.nama.trim()) { toast('Isi nama berkas terlebih dahulu.', 'warn'); return; } bk = { berkas_id: bkId(), nama: W.bk.nama.trim(), kelas_ids: W.bk.kelas.slice(), jenis: W.bk.jenis, mapel_id: W.mapel }; }
   const sel = W.items.filter((it, i) => okIdx[i]), withImg = sel.filter((it) => it.img);
   btnBusy(btn, true, 'Menyiapkan…');
   try {
     const ids = withImg.length ? await uploadSoalImages(withImg, (n, tot) => btnLabel(btn, `Mengunggah gambar ${n}/${tot}…`)) : new Map();
+    if (!bk.berkas_id && bk.soal) { btnLabel(btn, 'Menyiapkan berkas…'); bk = await bkEnsure(bk); }
     btnLabel(btn, 'Menyimpan soal…');
-    const r = await call('soal.import', { mapel_id: W.mapel, rows: sel.map((it) => impRowOut(it, ids.get(it))) });
+    const r = await call('soal.import', { mapel_id: W.mapel, rows: sel.map((it) => impRowOut(it, ids.get(it))), berkas: bkInfo(bk) });
     if (S.c.soal && S.c.soal.d) S.c.soal.d = r.soal.concat(S.c.soal.d);
+    if (S.c.bkDraft) delete S.c.bkDraft['B:' + r.berkas_id];
     (W.items || []).forEach((it) => { if (it.thumb) URL.revokeObjectURL(it.thumb); });
-    toast(r.inserted + ' soal berhasil ditambahkan ke bank soal' + (ids.size ? ', ' + withImg.length + ' dengan gambar' : '') + '.', 'ok', 6000); S.c.imp = null; go('g-bank', {}, { replace: true });
+    toast(r.inserted + ' soal masuk ke berkas "' + bk.nama + '"' + (ids.size ? ', ' + withImg.length + ' dengan gambar' : '') + '.', 'ok', 6000); S.c.imp = null; go('g-berkas', { k: 'B:' + r.berkas_id }, { replace: true });
   } catch (e) { btnBusy(btn, false); failToast(e); }
 }
 
 // ── Daftar ujian ──
 route('g-ujian', {
   title: 'Ujian CBT', roles: ['GURU', 'ADMIN'],
+  leave() { S.c.ujSel = null; },
   render(p) {
-    const g = G(), tab = p.tab || 'semua';
+    const g = G(), tab = p.tab || 'semua', SEL = S.c.ujSel;
     const all = g.ulangan.slice().sort(by('buka', -1)), grp = { DRAF: [], JADWAL: [], AKTIF: [], SELESAI: [] };
     all.forEach((u) => grp[ulStatus(u).k].push(u));
     const list = tab === 'semua' ? all : grp[tab];
-    return `<div class="page"><div class="page-hd"><div><h1>Ujian CBT</h1><p class="sub">Susun ulangan dari bank soal, pantau langsung, koreksi esai, dan analisis hasil.</p></div><div class="flex g8"><button class="btn btn-secondary" onclick="go('g-bank')">${I('list-check')}Bank Soal</button><button class="btn btn-primary" onclick="go('g-ujian-form',{})">${I('plus')}Buat Ujian</button></div></div>
-      <div class="tabs">${[['semua', 'Semua', all.length], ['AKTIF', 'Berlangsung', grp.AKTIF.length], ['JADWAL', 'Terjadwal', grp.JADWAL.length], ['DRAF', 'Draf', grp.DRAF.length], ['SELESAI', 'Selesai', grp.SELESAI.length]].map((t) => `<button class="tab ${tab === t[0] ? 'on' : ''}" onclick="go('g-ujian',{tab:'${t[0]}'},{replace:true})">${t[1]} <span class="badge ${t[0] === 'AKTIF' && t[2] ? 'p' : 'neu'}">${t[2]}</span></button>`).join('')}</div>
-      <div class="grid gc2 mt16">${list.map((u) => { const st = ulStatus(u);
-        return `<div class="card card-p"><div class="flex items-c g8 wrap"><span class="pill pill-p mono">${esc(JENIS_UL[u.jenis] || u.jenis)}</span>${pill(st.l, st.c, st.k === 'AKTIF' ? 'activity' : st.k === 'DRAF' ? 'edit' : 'calendar')}${u.koreksi ? pill(u.koreksi + ' perlu koreksi', 'vio', 'pen') : ''}<span class="ml-a mono small muted">${u.token ? I('key', 'ic-sm') + ' ' + esc(u.token) : 'Tanpa token'}</span></div>
+    const canDel = (u) => ulStatus(u).k !== 'AKTIF';
+    const nSel = SEL ? Object.keys(SEL).length : 0;
+    return `<div class="page"><div class="page-hd"><div><h1>Ujian CBT</h1><p class="sub">Susun ulangan dari bank soal, pantau langsung, koreksi esai, dan analisis hasil.</p></div><div class="flex g8 wrap"><button class="btn btn-secondary" onclick="go('g-bank')">${I('list-check')}Bank Soal</button><button class="btn btn-primary" onclick="go('g-ujian-form',{})">${I('plus')}Buat Ujian</button></div></div>
+      <div class="flex items-c g8 wrap"><div class="tabs f1" style="min-width:0">${[['semua', 'Semua', all.length], ['AKTIF', 'Berlangsung', grp.AKTIF.length], ['JADWAL', 'Terjadwal', grp.JADWAL.length], ['DRAF', 'Draf', grp.DRAF.length], ['SELESAI', 'Selesai', grp.SELESAI.length]].map((t) => `<button class="tab ${tab === t[0] ? 'on' : ''}" onclick="go('g-ujian',{tab:'${t[0]}'},{replace:true})">${t[1]} <span class="badge ${t[0] === 'AKTIF' && t[2] ? 'p' : 'neu'}">${t[2]}</span></button>`).join('')}</div>
+        ${list.some(canDel) ? `<button class="btn ${SEL ? 'btn-secondary' : 'btn-ghost'} btn-sm" onclick="S.c.ujSel=S.c.ujSel?null:{};rerender()">${I(SEL ? 'x' : 'checkbox', 'ic-sm')}${SEL ? 'Batal pilih' : 'Pilih & hapus'}</button>` : ''}</div>
+      ${SEL ? `<div class="banner banner-info mt12">${I('info')}<div class="f1 small">Ketuk kartu ujian draf, terjadwal, atau selesai untuk memilih. Ujian yang sedang berlangsung tidak bisa dihapus.</div>${list.some(canDel) ? `<button class="btn btn-ghost btn-sm" onclick="ujSelAll(${JSON.stringify(list.filter(canDel).map((u) => u.ulangan_id)).replace(/"/g, '&quot;')})">Pilih semua (${list.filter(canDel).length})</button>` : ''}</div>` : ''}
+      <div class="grid gc2 mt16">${list.map((u) => { const st = ulStatus(u), on = SEL && SEL[u.ulangan_id], selectable = SEL && canDel(u);
+        return `<div class="card card-p uj-card ${on ? 'uj-on' : ''} ${SEL && !canDel(u) ? 'uj-dim' : ''}" ${selectable ? `onclick="ujToggle('${u.ulangan_id}')" role="button"` : ''}>${selectable ? `<span class="uj-chk">${on ? I('check', 'ic-sm') : ''}</span>` : ''}<div class="flex items-c g8 wrap"><span class="pill pill-p mono">${esc(JENIS_UL[u.jenis] || u.jenis)}</span>${pill(st.l, st.c, st.k === 'AKTIF' ? 'activity' : st.k === 'DRAF' ? 'edit' : 'calendar')}${u.koreksi ? pill(u.koreksi + ' perlu koreksi', 'vio', 'pen') : ''}<span class="ml-a mono small muted">${u.token ? I('key', 'ic-sm') + ' ' + esc(u.token) : 'Tanpa token'}</span></div>
           <h3 class="mt12" style="font-size:17px">${esc(u.judul)}</h3><p class="small muted mt4">${esc(mapelNm(u.mapel_id))} · Kelas ${u.kelas_ids.map(kelasShort).join(', ')} · ${u.jumlah_soal} soal · ${u.durasi_menit} menit</p>
           <p class="small tx2 mt8 flex items-c g6">${I('calendar', 'ic-sm')}${D.dt(u.buka)} – ${D.rel(u.tutup)}</p>
           <div class="flex items-c g8 mt12"><div class="f1"><div class="meter"><i style="width:${u.peserta ? u.selesai / u.peserta * 100 : 0}%"></i></div></div><span class="mono xs">${u.selesai}/${u.peserta} selesai</span></div>
-          <div class="flex g8 mt16 wrap">${st.k === 'AKTIF' ? `<button class="btn btn-primary btn-sm" onclick="go('g-monitor',{id:'${u.ulangan_id}'})">${I('monitor', 'ic-sm')}Monitor Live</button>` : ''}
+          ${SEL ? '' : `<div class="flex g8 mt16 wrap">${st.k === 'AKTIF' ? `<button class="btn btn-primary btn-sm" onclick="go('g-monitor',{id:'${u.ulangan_id}'})">${I('monitor', 'ic-sm')}Monitor Live</button>` : ''}
             ${u.selesai ? `<button class="btn btn-secondary btn-sm" onclick="go('g-hasil',{id:'${u.ulangan_id}'})">${I('chart', 'ic-sm')}Hasil & Analisis</button>` : ''}${u.koreksi ? `<button class="btn btn-secondary btn-sm" onclick="go('g-koreksi',{id:'${u.ulangan_id}'})">${I('pen', 'ic-sm')}Koreksi Esai</button>` : ''}
-            <button class="btn btn-ghost btn-sm" onclick="go('g-ujian-form',{id:'${u.ulangan_id}'})">${I('edit', 'ic-sm')}${st.k === 'DRAF' ? 'Lanjutkan' : 'Ubah'}</button>${!u.selesai ? `<button class="btn btn-ghost btn-sm ink-err ml-a" onclick="delUjian('${u.ulangan_id}')">${I('trash', 'ic-sm')}</button>` : ''}</div></div>`; }).join('') || `<div class="card" style="grid-column:1/-1">${emptyState('exam', 'Belum ada ujian', 'Buat ujian CBT dari bank soal.', `<button class="btn btn-primary" onclick="go('g-ujian-form',{})">${I('plus')}Buat Ujian</button>`)}</div>`}</div></div>`;
+            <button class="btn btn-ghost btn-sm" onclick="go('g-ujian-form',{id:'${u.ulangan_id}'})">${I('edit', 'ic-sm')}${st.k === 'DRAF' ? 'Lanjutkan' : 'Ubah'}</button>${canDel(u) ? `<button class="btn btn-ghost btn-sm ink-err ml-a" title="Hapus ujian" onclick="delUjian('${u.ulangan_id}')">${I('trash', 'ic-sm')}</button>` : ''}</div>`}</div>`; }).join('') || `<div class="card" style="grid-column:1/-1">${emptyState('exam', 'Belum ada ujian', 'Buat ujian CBT dari bank soal.', `<button class="btn btn-primary" onclick="go('g-ujian-form',{})">${I('plus')}Buat Ujian</button>`)}</div>`}</div>
+      ${SEL && nSel ? `<div class="sticky-bar"><span class="small f1"><b>${nSel}</b> ujian dipilih</span><button class="btn btn-ghost" onclick="S.c.ujSel={};rerender()">Kosongkan</button><button class="btn btn-danger btn-lg" onclick="delUjian(Object.keys(S.c.ujSel))">${I('trash')}Hapus ${nSel} Ujian</button></div>` : ''}</div>`;
   }
 });
-function delUjian(id) {
-  confirmBox('Hapus ujian ini?', { danger: true, yes: 'Hapus' }).then((ok) => {
-    if (!ok) return; const g = G(), bak = g.ulangan.slice(); g.ulangan = g.ulangan.filter((u) => u.ulangan_id !== id); rerender();
-    call('ulangan.delete', { ulangan_id: id }).then(() => { toast('Ujian dihapus.', 'ok'); saveSnap(); }).catch((e) => { g.ulangan = bak; rerender(); failToast(e); });
-  });
+function ujToggle(id) { const s = S.c.ujSel; if (!s) return; if (s[id]) delete s[id]; else s[id] = 1; rerender(); }
+function ujSelAll(ids) { const s = S.c.ujSel || (S.c.ujSel = {}); const all = ids.every((id) => s[id]); ids.forEach((id) => { if (all) delete s[id]; else s[id] = 1; }); rerender(); }
+/** Unduh rekap nilai sebuah ujian (Excel) sebelum dihapus. */
+function dlHasil(id, btn) {
+  if (btn) btnBusy(btn, true, 'Menyiapkan…');
+  call('ulangan.results', { ulangan_id: id }).then((d) => { S.c['res_' + id] = { t: Date.now(), d }; exportHasil(id); if (btn) { btnBusy(btn, false); btn.innerHTML = I('check', 'ic-sm') + 'Terunduh'; } }).catch((e) => { if (btn) btnBusy(btn, false); failToast(e); });
+}
+/** Hapus satu / beberapa ujian. Ujian yang sudah dikerjakan: nilai ikut terhapus (dicadangkan otomatis ke Drive), wajib konfirmasi ketik HAPUS. */
+function delUjian(ids) {
+  ids = [].concat(ids); const g = G(), uls = ids.map((id) => g.ulangan.find((u) => u.ulangan_id === id)).filter(Boolean);
+  if (!uls.length) return;
+  const withRes = uls.filter((u) => u.selesai > 0), nNilai = sum(withRes.map((u) => u.selesai));
+  const run = (hasil, close) => {
+    const bak = g.ulangan.slice(), del = {}; uls.forEach((u) => { del[u.ulangan_id] = 1; });
+    g.ulangan = g.ulangan.filter((u) => !del[u.ulangan_id]); S.c.ujSel = null; if (close) close(); rerender();
+    call('ulangan.delete', { ulangan_ids: uls.map((u) => u.ulangan_id), hapus_hasil: hasil }).then((r) => {
+      toast(r.deleted + ' ujian dihapus' + (r.nilai ? ' · ' + r.nilai + ' nilai dicadangkan ke Drive (Cadangan › Ujian Terhapus)' : '') + '.', 'ok', 7000); drop('ud_'); saveSnap();
+    }).catch((e) => { g.ulangan = bak; rerender(); failToast(e); });
+  };
+  const names = uls.slice(0, 3).map((u) => '<b>' + esc(u.judul) + '</b>').join(', ') + (uls.length > 3 ? ' dan ' + (uls.length - 3) + ' lainnya' : '');
+  if (!withRes.length) { confirmBox(`Hapus ${uls.length > 1 ? uls.length + ' ujian: ' : 'ujian '}${names}? Soal di bank soal tetap aman.`, { danger: true, yes: 'Hapus', title: 'Hapus ujian?' }).then((ok) => { if (ok) run(false); }); return; }
+  sheet({ title: 'Hapus ujian beserta nilai?', icon: 'trash', body: `<div class="col g12">
+      <div class="banner banner-warn">${I('alert')}<div class="small">${withRes.length === uls.length ? '' : uls.length + ' ujian dipilih. '}<b>${withRes.length} ujian</b> sudah dikerjakan siswa. <b>${nNilai} nilai</b> dan riwayat pelanggarannya ikut terhapus dari aplikasi (rapor & rekap nilai).</div></div>
+      <div class="col g8">${withRes.map((u) => `<div class="info-tile"><div class="f1" style="min-width:0"><div class="small bold truncate">${esc(u.judul)}</div><div class="xs muted">${esc(mapelNm(u.mapel_id))} · ${u.selesai} siswa sudah mengerjakan</div></div><button type="button" class="btn btn-secondary btn-sm" onclick="dlHasil('${u.ulangan_id}',this)">${I('download', 'ic-sm')}Unduh nilai</button></div>`).join('')}</div>
+      <p class="small tx2">${I('shield', 'ic-sm ink-ok')} Salinan nilai otomatis disimpan ke Google Drive sekolah (folder <b>Cadangan › Ujian Terhapus</b>). Soal di bank soal tidak ikut terhapus.</p>
+      <div class="field"><label class="label">Ketik <b class="mono">HAPUS</b> untuk konfirmasi</label><input class="input mono" id="ujDelTxt" autocomplete="off" placeholder="HAPUS"></div></div>`,
+    foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-danger" id="ujDelGo" disabled>${I('trash')}Hapus Permanen</button>`,
+    mount: (el, close) => { el.querySelector('[data-x2]').onclick = close; const inp = $('#ujDelTxt', el), go2 = $('#ujDelGo', el);
+      inp.oninput = () => { go2.disabled = inp.value.trim().toUpperCase() !== 'HAPUS'; };
+      go2.onclick = () => run(true, close); } });
 }
 
+const VIOL_TXT = { PINDAH_TAB: 'meninggalkan halaman ujian (pindah tab/aplikasi).', KELUAR_LAYAR_PENUH: 'keluar dari layar penuh.', JENDELA_MENGAMBANG: 'membuka jendela/aplikasi lain (jendela mengambang, notifikasi, atau pencarian layar).', LAYAR_TERBAGI: 'membuka ujian di layar terbagi / jendela kecil.', TANGKAP_LAYAR: 'menekan tombol tangkapan layar.' };
 // ── Form buat / ubah ujian ──
 route('g-ujian-form', {
   title: (p) => p.id ? 'Ubah Ujian CBT' : 'Buat Ujian CBT', roles: ['GURU', 'ADMIN'], back: 'g-ujian', nav: 'g-ujian', form: true,
@@ -508,19 +725,22 @@ route('g-ujian-form', {
     const bank = soalList(), det = p.id ? need('ud_' + p.id, 'ulangan.detail', { ulangan_id: p.id }, 10000) : null;
     if (!bank || (p.id && !det)) return skelPage();
     let U = S.c.uForm;
-    if (!U || U.key !== (p.id || 'baru')) {
-      const u = det ? det.ulangan : null, c = cfg(), d0 = D.day0(now()) + 864e5;
+    const fk = p.id || (p.berkas ? 'bk:' + p.berkas : 'baru');
+    if (!U || U.key !== fk) {
+      const u = det ? det.ulangan : null, c = cfg(), d0 = D.day0(now()) + 864e5, bk = !u && p.berkas ? bkFind(p.berkas) : null;
       const [bh, bm] = String(B().admin && B().admin.settings ? B().admin.settings.jam_buka_default : '07:00').split(':').map(Number);
-      U = S.c.uForm = { key: p.id || 'baru', id: p.id, terkunci: det ? det.terkunci : false,
-        judul: u ? u.judul : '', jenis: u ? u.jenis : 'UH', mapel_id: u ? u.mapel_id : (G().penugasan[0] || {}).mapel_id, kelas_ids: u ? u.kelas_ids : [],
+      const bkK = bk ? bk.kelas_ids.filter((k) => hasRole('ADMIN') || G().penugasan.some((x) => x.mapel_id === bk.mapel_id && x.kelas_id === k)) : [];
+      U = S.c.uForm = { key: fk, id: p.id, terkunci: det ? det.terkunci : false,
+        judul: u ? u.judul : bk ? bk.nama : '', jenis: u ? u.jenis : bk && JENIS_UL[bk.jenis] ? bk.jenis : 'UH', mapel_id: u ? u.mapel_id : bk ? bk.mapel_id : (G().penugasan[0] || {}).mapel_id, kelas_ids: u ? u.kelas_ids : bkK,
         buka: u ? u.buka : d0 + (bh || 7) * 3600000 + (bm || 0) * 60000, tutup: u ? u.tutup : d0 + 12 * 3600000, durasi: u ? u.durasi_menit : 90,
         pakai_token: u ? !!u.token : true, token: u ? u.token : '', acak_soal: u ? u.acak_soal : true, acak_opsi: u ? u.acak_opsi : true,
         tampilkan: u ? u.tampilkan_nilai : '', batas: u ? u.batas_pelanggaran : '', status: u ? u.status : 'DRAF',
-        soal: det ? det.soal.map((s) => ({ soal_id: s.soal_id, bobot: s.bobot })) : [], mode: 'manual', acakN: 20 };
+        soal: det ? det.soal.map((s) => ({ soal_id: s.soal_id, bobot: s.bobot })) : bk ? bk.soal.map((s) => ({ soal_id: s.soal_id, bobot: s.skor_maks })) : [], mode: 'manual', acakN: 20 };
+      if (!U.mapel_id) U.mapel_id = (bkMapelOpts()[0]) || '';
     }
     const bankBy = {}; bank.forEach((s) => { bankBy[s.soal_id] = s; });
-    const pens = G().penugasan.filter((x) => x.mapel_id === U.mapel_id), kelasOpts = uniqBy(pens, (x) => x.kelas_id);
-    const mapels = uniqBy(G().penugasan, (x) => x.mapel_id);
+    const pens = G().penugasan.filter((x) => x.mapel_id === U.mapel_id), kelasOpts = hasRole('ADMIN') && !pens.length ? (B().kelas || []).map((k) => ({ kelas_id: k.kelas_id })) : uniqBy(pens, (x) => x.kelas_id);
+    const mapels = uniqBy(G().penugasan, (x) => x.mapel_id); bkMapelOpts().concat([U.mapel_id]).forEach((m) => { if (m && !mapels.some((x) => x.mapel_id === m)) mapels.push({ mapel_id: m }); });
     const sel = U.soal.filter((s) => bankBy[s.soal_id]);
     const comp = { PG: [0, 0], MCMA: [0, 0], KATEGORI: [0, 0], ESAI: [0, 0] }; sel.forEach((s) => { const t = bankBy[s.soal_id].tipe; comp[t][0]++; comp[t][1] += num(s.bobot); });
     const totalBobot = sum(sel.map((s) => s.bobot));
@@ -545,7 +765,7 @@ route('g-ujian-form', {
           <div class="toggle-row"><div class="tile sm">${I('list')}</div><div class="f1"><b>Acak opsi pilihan (A–E)</b><div class="small muted">Urutan pilihan jawaban teracak otomatis.</div></div><label class="switch"><input type="checkbox" data-uc="acak_opsi" ${U.acak_opsi ? 'checked' : ''}><span></span></label></div>
           <div class="toggle-row"><div class="tile sm ok">${I('eye')}</div><div class="f1"><b>Tampilkan nilai ke siswa</b><div class="small muted">Nilai pilihan ganda langsung tampil setelah selesai.</div></div><select class="select input-sm" style="width:190px" data-u="tampilkan"><option value="">Ikuti global</option><option value="TRUE" ${U.tampilkan === 'TRUE' ? 'selected' : ''}>Tampilkan</option><option value="FALSE" ${U.tampilkan === 'FALSE' ? 'selected' : ''}>Sembunyikan</option></select></div></div>`)}
         ${sect(5, 'Komposisi Butir Soal', `<div class="flex g8 wrap items-c mb12"><div class="seg">${[['manual', 'Pilih Manual'], ['acak', 'Acak Otomatis']].map((x) => `<button type="button" class="${U.mode === x[0] ? 'on' : ''}" onclick="S.c.uForm.mode='${x[0]}';rerender()" ${U.terkunci ? 'disabled' : ''}>${x[1]}</button>`).join('')}</div>
-            ${U.mode === 'acak' && !U.terkunci ? `<span class="small">Ambil</span><input class="input input-sm" type="number" min="1" style="width:80px" value="${U.acakN}" onchange="S.c.uForm.acakN=+this.value"><span class="small">soal acak dari ${bank.filter((s) => s.mapel_id === U.mapel_id).length} soal ${esc(mapelNm(U.mapel_id))}</span><button type="button" class="btn btn-secondary btn-sm" onclick="uRandom()">${I('refresh', 'ic-sm')}Ambil</button>` : !U.terkunci ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openSoalPicker()">${I('plus', 'ic-sm')}Tambah dari Bank Soal</button><button type="button" class="btn btn-ghost btn-sm" onclick="go('g-import')">${I('upload', 'ic-sm')}Import Excel</button>` : ''}</div>
+            ${U.mode === 'acak' && !U.terkunci ? `<span class="small">Ambil</span><input class="input input-sm" type="number" min="1" style="width:80px" value="${U.acakN}" onchange="S.c.uForm.acakN=+this.value"><span class="small">soal acak dari ${bank.filter((s) => s.mapel_id === U.mapel_id).length} soal ${esc(mapelNm(U.mapel_id))}</span><button type="button" class="btn btn-secondary btn-sm" onclick="uRandom()">${I('refresh', 'ic-sm')}Ambil</button>` : !U.terkunci ? `<button type="button" class="btn btn-primary btn-sm" onclick="openBerkasPicker()">${I('file-text', 'ic-sm')}Ambil dari Berkas</button><button type="button" class="btn btn-secondary btn-sm" onclick="openSoalPicker()">${I('plus', 'ic-sm')}Pilih Butir Soal</button><button type="button" class="btn btn-ghost btn-sm" onclick="go('g-import')">${I('upload', 'ic-sm')}Import Excel</button>` : ''}</div>
           ${sel.length ? `<div class="col g8">${sel.map((s, i) => { const b = bankBy[s.soal_id]; return `<div class="card" style="padding:10px 12px"><div class="flex items-c g12"><span class="mono bold small" style="width:24px">${i + 1}</span><div class="f1" style="min-width:0"><div class="flex items-c g8"><span class="mono xs muted">#${esc(String(b.soal_id).slice(0, 4).toUpperCase())}</span>${pill(TIPE_SOAL[b.tipe].replace('PG Kompleks ', ''), b.tipe === 'ESAI' ? 'vio' : 'info')}</div><div class="small truncate mt4">${esc(b.teks)}</div></div>
               <div class="flex items-c g4"><span class="xs muted">Bobot</span><input class="input input-sm mono" style="width:70px" type="number" min="0.5" step="0.5" value="${s.bobot}" onchange="uBobot(${i},this.value)" ${U.terkunci ? 'disabled' : ''}></div>
               ${U.terkunci ? '' : `<div class="flex g4"><button type="button" class="icon-btn" onclick="uMove(${i},-1)" ${i === 0 ? 'disabled' : ''}>${I('chev-u')}</button><button type="button" class="icon-btn" onclick="uMove(${i},1)" ${i === sel.length - 1 ? 'disabled' : ''}>${I('chev-d')}</button><button type="button" class="icon-btn ink-err" onclick="uRemove(${i})">${I('x')}</button></div>`}</div></div>`; }).join('')}</div>` : emptyState('list-check', 'Belum ada soal', 'Tambahkan soal dari bank soal mapel ini.')}`)}
@@ -579,6 +799,22 @@ function openSoalPicker() {
   const pool = S.c.soal.d.filter((s) => s.mapel_id === U.mapel_id);
   sheet({ title: 'Ambil dari Bank Soal — ' + esc(mapelNm(U.mapel_id)), size: 'wide', icon: 'list-check', body: pool.length ? `<div class="flex g8 mb12"><button class="btn btn-ghost btn-sm" onclick="$$('#pickList input').forEach(x=>x.checked=true)">Pilih semua</button><button class="btn btn-ghost btn-sm" onclick="$$('#pickList input').forEach(x=>x.checked=false)">Kosongkan</button></div><div class="col g8" id="pickList">${pool.map((s) => `<label class="card flex items-s g12" style="padding:12px;cursor:pointer"><input type="checkbox" value="${s.soal_id}" ${have[s.soal_id] ? 'checked disabled' : ''} style="width:18px;height:18px;margin-top:3px;accent-color:var(--p600)"><div class="f1" style="min-width:0"><div class="flex g8 items-c">${pill(TIPE_SOAL[s.tipe].replace('PG Kompleks ', ''), s.tipe === 'ESAI' ? 'vio' : 'info')}<span class="xs muted">${fmtN(s.skor_maks)} poin</span>${have[s.soal_id] ? '<span class="xs ink-ok bold">sudah dipilih</span>' : ''}</div><div class="small mt4 clamp2">${esc(s.teks)}</div></div></label>`).join('')}</div>` : emptyState('list-check', 'Bank soal mapel ini kosong', 'Buat atau import soal terlebih dahulu.', `<button class="btn btn-primary" onclick="closeAllSheets();go('g-bank')">Ke Bank Soal</button>`),
     foot: `<button class="btn btn-primary" id="pickOk">${I('plus')}Masukkan ke Paket Ujian</button>`, mount: (el, close) => { const b = $('#pickOk', el); if (b) b.onclick = () => { $$('#pickList input:checked:not(:disabled)', el).forEach((x) => { const s = pool.find((y) => y.soal_id === x.value); U.soal.push({ soal_id: s.soal_id, bobot: s.skor_maks }); }); close(); rerender(); }; } });
+}
+/** Ambil semua soal dari satu berkas sekaligus (soal yang sudah ada tidak digandakan). */
+function openBerkasPicker() {
+  const U = S.c.uForm, all = berkasList(S.c.soal.d || []).filter((b) => b.soal.length && (hasRole('ADMIN') || b.pembuat_id === me().user_id || b.mapel_id === U.mapel_id));
+  const same = all.filter((b) => b.mapel_id === U.mapel_id), other = all.filter((b) => b.mapel_id !== U.mapel_id);
+  const have = {}; U.soal.forEach((s) => { have[s.soal_id] = 1; });
+  const row = (b) => { const n = b.soal.filter((s) => !have[s.soal_id]).length;
+    return `<button type="button" class="bk-pick" data-k="${b.key}" ${n ? '' : 'disabled'}><span class="bk-ic mp${hashN(b.mapel_id) % 6}">${I('file-text')}<b>${b.soal.length}</b></span><span class="f1" style="min-width:0;text-align:left"><b class="truncate" style="display:block">${esc(b.nama)}</b><span class="xs muted">${esc(mapelNm(b.mapel_id))} · ${b.kelas_ids.map(kelasShort).join(', ') || 'kelas belum diatur'}${hasRole('ADMIN') ? ' · ' + esc(b.pembuat || '') : ''}</span></span>${bkJenisPill(b.jenis)}<span class="xs ${n ? 'ink-p bold' : 'muted'}">${n ? '+' + n + ' soal' : 'sudah masuk'}</span></button>`; };
+  sheet({ title: 'Ambil dari Berkas Soal', icon: 'file-text', size: 'wide', body: all.length ? `${same.length ? `<div class="lbl mb8">Berkas ${esc(mapelNm(U.mapel_id))}</div><div class="col g8">${same.map(row).join('')}</div>` : `<div class="banner banner-info">${I('info')}<div class="small">Belum ada berkas untuk ${esc(mapelNm(U.mapel_id))}.</div></div>`}
+      ${other.length ? `<div class="lbl mt16 mb8">Mapel lain</div><div class="col g8">${other.map(row).join('')}</div>` : ''}`
+    : emptyState('file-text', 'Belum ada berkas soal', 'Import berkas Word/Excel di Bank Soal terlebih dahulu.', `<button class="btn btn-primary" onclick="closeAllSheets();go('g-import')">Import Berkas Soal</button>`),
+  mount: (el, close) => { $$('.bk-pick', el).forEach((x) => { x.onclick = () => { const b = all.find((y) => y.key === x.dataset.k); if (!b) return; let n = 0;
+    b.soal.forEach((s) => { if (!have[s.soal_id]) { U.soal.push({ soal_id: s.soal_id, bobot: s.skor_maks }); n++; } });
+    if (!U.judul.trim()) U.judul = b.nama;
+    if (b.mapel_id !== U.mapel_id && !U.soal.some((s) => !b.soal.some((y) => y.soal_id === s.soal_id))) { U.mapel_id = b.mapel_id; U.kelas_ids = b.kelas_ids.filter((k) => hasRole('ADMIN') || G().penugasan.some((x) => x.mapel_id === b.mapel_id && x.kelas_id === k)); }
+    close(); toast(n + ' soal dari "' + b.nama + '" dimasukkan.', 'ok'); rerender(); }; }); } });
 }
 function saveUjian(status) {
   const U = S.c.uForm;
@@ -625,7 +861,7 @@ route('g-monitor', {
             <td style="min-width:96px"><div class="mono small">${r.p}/${d.total}</div><div class="meter mt4 ${r.st === 'SELESAI' ? 'ok' : ''}"><i style="width:${d.total ? r.p / d.total * 100 : 0}%"></i></div></td>
             <td>${r.v ? `<span class="pill ${r.v >= u.limit ? 'pill-err' : 'pill-warn'}">${I('alert', 'ic-sm')}${r.v}/${u.limit} ${r.v >= u.limit ? 'Kritis' : 'Waspada'}</span>` : `<span class="xs muted">0 · Bersih</span>`}</td>
             <td class="tr"><div class="flex g4 jc-e">${r.st === 'TERKUNCI' ? `<button class="btn btn-sm btn-danger" style="white-space:nowrap" onclick="monUnlock('${u.ulangan_id}','${r.id}',${jsq(r.nama)},${r.v})">${I('unlock', 'ic-sm')}Buka Kunci</button>` : ''}${r.st === 'MENGERJAKAN' ? `<button class="btn btn-sm btn-secondary" onclick="monAct('${u.ulangan_id}','${r.id}','ADDTIME',5)">+5m</button>` : ''}${r.id ? `<button class="icon-btn" onclick="monMenu(this,'${u.ulangan_id}','${r.id}',${jsq(r.nama)},'${r.st}')">${I('more')}</button>` : ''}</div></td></tr>`; }).join('') || `<tr><td colspan="5">${emptyState('users', 'Tidak ada peserta', '')}</td></tr>`}</tbody></table></div></div>
-      <div class="col g16"><div class="card"><div class="card-hd"><h3 class="flex items-c g8">${I('shield', 'ink-p')}Security Audit Log</h3>${pill('LIVE', 'err')}</div><div style="max-height:560px;overflow:auto">${d.logs.length ? d.logs.map((l) => `<div class="row-item" style="align-items:flex-start"><div class="tile sm ${l.jenis === 'SELESAI' ? 'ok' : l.st === 'TERKUNCI' ? 'err' : 'warn'}">${I(l.jenis === 'SELESAI' ? 'check-c' : l.jenis === 'KELUAR_LAYAR_PENUH' ? 'maximize' : 'alert')}</div><div class="f1" style="min-width:0"><div class="xs muted mono">${D.t(l.t)}.${pad(new Date(l.t).getSeconds())} ${TZL}</div><div class="small"><b>${esc(l.nama)}</b> ${l.jenis === 'SELESAI' ? 'menyerahkan jawaban.' : l.jenis === 'KELUAR_LAYAR_PENUH' ? 'keluar dari layar penuh.' : 'meninggalkan halaman ujian (pindah tab/aplikasi).'}</div></div></div>`).join('') : `<div class="card-bd">${emptyState('shield', 'Belum ada kejadian', 'Pelanggaran dan penyerahan jawaban akan tercatat di sini.')}</div>`}</div></div></div></div></div>`;
+      <div class="col g16"><div class="card"><div class="card-hd"><h3 class="flex items-c g8">${I('shield', 'ink-p')}Security Audit Log</h3>${pill('LIVE', 'err')}</div><div style="max-height:560px;overflow:auto">${d.logs.length ? d.logs.map((l) => `<div class="row-item" style="align-items:flex-start"><div class="tile sm ${l.jenis === 'SELESAI' ? 'ok' : l.st === 'TERKUNCI' ? 'err' : 'warn'}">${I(l.jenis === 'SELESAI' ? 'check-c' : l.jenis === 'KELUAR_LAYAR_PENUH' || l.jenis === 'LAYAR_TERBAGI' ? 'maximize' : l.jenis === 'TANGKAP_LAYAR' ? 'camera' : 'alert')}</div><div class="f1" style="min-width:0"><div class="xs muted mono">${D.t(l.t)}.${pad(new Date(l.t).getSeconds())} ${TZL}</div><div class="small"><b>${esc(l.nama)}</b> ${l.jenis === 'SELESAI' ? 'menyerahkan jawaban.' : (VIOL_TXT[l.jenis] || VIOL_TXT.PINDAH_TAB)}</div></div></div>`).join('') : `<div class="card-bd">${emptyState('shield', 'Belum ada kejadian', 'Pelanggaran dan penyerahan jawaban akan tercatat di sini.')}</div>`}</div></div></div></div></div>`;
   },
   mount(p) {
     if (S.c.monTimer) clearInterval(S.c.monTimer);
