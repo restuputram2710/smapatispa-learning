@@ -567,6 +567,7 @@ function examSync(force) {
     X.syncing = false; X.lastSync = Date.now();
     if (JSON.stringify(X.a).length + X.rg.size === wasDirtyAt) X.dirty = false;
     if (r.serverNow) X.off = r.serverNow - Date.now();
+    if (r.b && r.b < X.batas - 5000 && X.status === 'MENGERJAKAN') toast('Guru menyelesaikan ujian lebih awal. Jawabanmu dikirim otomatis saat waktu habis — periksa jawabanmu sekarang.', 'warn', 9000);
     if (r.b) X.batas = r.b;
     if (r.st === 'LOST') { recoverExam(); return; }
     if (r.st === 'TERKUNCI' && X.status !== 'TERKUNCI') { X.status = 'TERKUNCI'; X.v = r.v; showLocked(); }
