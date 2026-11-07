@@ -723,29 +723,37 @@ function finishUjian(id) {
     }).catch(failToast);
   });
 }
-/** Hapus satu / beberapa ujian. Ujian yang sudah dikerjakan: nilai ikut terhapus (dicadangkan otomatis ke Drive), wajib konfirmasi ketik HAPUS. */
+/** Hapus satu / beberapa ujian. Ujian yang sudah dikerjakan (selesai maupun baru dimulai): nilai ikut terhapus (dicadangkan otomatis ke Drive), wajib konfirmasi ketik HAPUS. */
 function delUjian(ids) {
   ids = [].concat(ids); const g = G(), uls = ids.map((id) => g.ulangan.find((u) => u.ulangan_id === id)).filter(Boolean);
   if (!uls.length || srvOld('2.4.0', 'Hapus ujian')) return;
-  const withRes = uls.filter((u) => u.selesai > 0), nNilai = sum(withRes.map((u) => u.selesai));
+  const dikerjakan = (u) => Math.max(u.dimulai || 0, u.selesai || 0);
   const run = (hasil, close) => {
     const bak = g.ulangan.slice(), del = {}; uls.forEach((u) => { del[u.ulangan_id] = 1; });
     g.ulangan = g.ulangan.filter((u) => !del[u.ulangan_id]); S.c.ujSel = null; if (close) close(); rerender();
     call('ulangan.delete', { ulangan_id: uls[0].ulangan_id, ulangan_ids: uls.map((u) => u.ulangan_id), hapus_hasil: hasil }).then((r) => {
-      toast((r && r.deleted || 1) + ' ujian dihapus' + (r.nilai ? ' · ' + r.nilai + ' nilai dicadangkan ke Drive (Cadangan › Ujian Terhapus)' : '') + '.', 'ok', 7000); drop('ud_'); saveSnap();
-    }).catch((e) => { g.ulangan = bak; rerender(); failToast(e); });
+      toast((r && r.deleted || 1) + ' ujian dihapus' + (r && r.nilai ? ' · ' + r.nilai + ' nilai dicadangkan ke Drive (Cadangan › Ujian Terhapus)' : '') + '.', 'ok', 7000); drop('ud_'); saveSnap();
+    }).catch((e) => {
+      g.ulangan = bak; rerender();
+      if (e.code === 'HAS_RESULT' && !hasil) askHasil(e.message); else failToast(e);
+    });
+  };
+  // ujian yang sudah dikerjakan siswa → dialog khusus (nilai ikut terhapus)
+  const askHasil = (note) => {
+    const withRes = uls.filter((u) => dikerjakan(u) > 0), list = withRes.length ? withRes : uls;
+    sheet({ title: 'Hapus ujian beserta nilai?', icon: 'trash', body: `<div class="col g12">
+        <div class="banner banner-warn">${I('alert')}<div class="small">${note ? esc(note).replace(/Centang[^.]*\./, '') + ' ' : `<b>${withRes.length} ujian</b> sudah dikerjakan siswa (<b>${sum(withRes.map(dikerjakan))} siswa</b>). `}Nilai dan jawaban siswa beserta riwayat pelanggarannya ikut terhapus dari aplikasi (rapor & rekap nilai).</div></div>
+        <div class="col g8">${list.map((u) => { const n = dikerjakan(u), b2 = n - (u.selesai || 0); return `<div class="info-tile"><div class="f1" style="min-width:0"><div class="small bold truncate">${esc(u.judul)}</div><div class="xs muted">${esc(mapelNm(u.mapel_id))}${n ? ' · ' + (u.selesai || 0) + ' selesai' + (b2 > 0 ? ' · ' + b2 + ' belum selesai' : '') : ''}</div></div>${u.selesai ? `<button type="button" class="btn btn-secondary btn-sm" onclick="dlHasil('${u.ulangan_id}',this)">${I('download', 'ic-sm')}Unduh nilai</button>` : ''}</div>`; }).join('')}</div>
+        <p class="small tx2">${I('shield', 'ic-sm ink-ok')} Salinan nilai otomatis disimpan ke Google Drive sekolah (folder <b>Cadangan › Ujian Terhapus</b>). Soal di bank soal tidak ikut terhapus.</p>
+        <div class="field"><label class="label">Ketik <b class="mono">HAPUS</b> untuk konfirmasi</label><input class="input mono" id="ujDelTxt" autocomplete="off" placeholder="HAPUS"></div></div>`,
+      foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-danger" id="ujDelGo" disabled>${I('trash')}Hapus Permanen</button>`,
+      mount: (el, close) => { el.querySelector('[data-x2]').onclick = close; const inp = $('#ujDelTxt', el), go2 = $('#ujDelGo', el);
+        inp.oninput = () => { go2.disabled = inp.value.trim().toUpperCase() !== 'HAPUS'; };
+        go2.onclick = () => run(true, close); } });
   };
   const names = uls.slice(0, 3).map((u) => '<b>' + esc(u.judul) + '</b>').join(', ') + (uls.length > 3 ? ' dan ' + (uls.length - 3) + ' lainnya' : '');
-  if (!withRes.length) { confirmBox(`Hapus ${uls.length > 1 ? uls.length + ' ujian: ' : 'ujian '}${names}? Soal di bank soal tetap aman.`, { danger: true, yes: 'Hapus', title: 'Hapus ujian?' }).then((ok) => { if (ok) run(false); }); return; }
-  sheet({ title: 'Hapus ujian beserta nilai?', icon: 'trash', body: `<div class="col g12">
-      <div class="banner banner-warn">${I('alert')}<div class="small">${withRes.length === uls.length ? '' : uls.length + ' ujian dipilih. '}<b>${withRes.length} ujian</b> sudah dikerjakan siswa. <b>${nNilai} nilai</b> dan riwayat pelanggarannya ikut terhapus dari aplikasi (rapor & rekap nilai).</div></div>
-      <div class="col g8">${withRes.map((u) => `<div class="info-tile"><div class="f1" style="min-width:0"><div class="small bold truncate">${esc(u.judul)}</div><div class="xs muted">${esc(mapelNm(u.mapel_id))} · ${u.selesai} siswa sudah mengerjakan</div></div><button type="button" class="btn btn-secondary btn-sm" onclick="dlHasil('${u.ulangan_id}',this)">${I('download', 'ic-sm')}Unduh nilai</button></div>`).join('')}</div>
-      <p class="small tx2">${I('shield', 'ic-sm ink-ok')} Salinan nilai otomatis disimpan ke Google Drive sekolah (folder <b>Cadangan › Ujian Terhapus</b>). Soal di bank soal tidak ikut terhapus.</p>
-      <div class="field"><label class="label">Ketik <b class="mono">HAPUS</b> untuk konfirmasi</label><input class="input mono" id="ujDelTxt" autocomplete="off" placeholder="HAPUS"></div></div>`,
-    foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-danger" id="ujDelGo" disabled>${I('trash')}Hapus Permanen</button>`,
-    mount: (el, close) => { el.querySelector('[data-x2]').onclick = close; const inp = $('#ujDelTxt', el), go2 = $('#ujDelGo', el);
-      inp.oninput = () => { go2.disabled = inp.value.trim().toUpperCase() !== 'HAPUS'; };
-      go2.onclick = () => run(true, close); } });
+  if (uls.some((u) => dikerjakan(u) > 0)) { askHasil(''); return; }
+  confirmBox(`Hapus ${uls.length > 1 ? uls.length + ' ujian: ' : 'ujian '}${names}? Soal di bank soal tetap aman.`, { danger: true, yes: 'Hapus', title: 'Hapus ujian?' }).then((ok) => { if (ok) run(false); });
 }
 
 const VIOL_TXT = { PINDAH_TAB: 'meninggalkan halaman ujian (pindah tab/aplikasi).', KELUAR_LAYAR_PENUH: 'keluar dari layar penuh.', JENDELA_MENGAMBANG: 'membuka jendela/aplikasi lain (jendela mengambang, notifikasi, atau pencarian layar).', LAYAR_TERBAGI: 'membuka ujian di layar terbagi / jendela kecil.', TANGKAP_LAYAR: 'menekan tombol tangkapan layar.' };
