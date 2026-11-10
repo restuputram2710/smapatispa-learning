@@ -131,10 +131,11 @@ route('w-kelas', {
             <div class="legend-row mt12"><span><i style="background:var(--subtle)"></i>0</span><span><i style="background:#DCE7FF"></i>Sedikit</span><span><i style="background:#2563EB"></i>Sedang</span><span><i style="background:#0B1F7A"></i>Banyak</span></div></div></div>`;
     } else if (tab === 'nilai') {
       const rows = d.rows.map((r) => { const o = { user_id: r.user_id, nama: r.nama, nis_nip: r.nis_nip, rata: r.rata }; d.mapelIds.forEach((m) => { o['m_' + m] = r.nilai[m] === undefined ? null : r.nilai[m]; }); return o; });
-      const cellN = (v) => v === null || v === undefined ? '<span class="muted">-</span>' : `<span class="mono ${v < d.kkm ? 'ink-err bold' : ''}">${fmtN(v)}</span>`;
+      const kOf = (r) => (r && r.kkm !== undefined && r.kkm !== null ? r.kkm : d.kkm), kBy = {}; d.rows.forEach((r) => { kBy[r.user_id] = kOf(r); });
+      const cellN = (v, uid) => v === null || v === undefined ? '<span class="muted">-</span>' : `<span class="mono ${v < (kBy[uid] !== undefined ? kBy[uid] : d.kkm) ? 'ink-err bold' : ''}">${fmtN(v)}</span>`;
       body = `<div class="card">${dataTable('leger_' + kid, rows, [{ h: 'Nama siswa', k: 'nama', r: (r) => `<div class="bold small">${esc(r.nama)}</div><div class="mono xs muted">${esc(r.nis_nip || '')}</div>` }]
-        .concat(d.mapelIds.map((m) => ({ h: mapelBy(m).kode || mapelNm(m).slice(0, 10), k: 'm_' + m, n: true, search: false, r: (r) => cellN(r['m_' + m]) })))
-        .concat([{ h: 'Rata-rata', k: 'rata', n: true, search: false, r: (r) => `<b>${cellN(r.rata)}</b>` }, { h: 'Status', k: 'rata', sort: false, search: false, r: (r) => r.rata === null ? '<span class="xs muted">Belum ada nilai</span>' : r.rata >= d.kkm ? pill('Tuntas', 'ok') : pill('Di bawah KKM', 'err') }]),
+        .concat(d.mapelIds.map((m) => ({ h: mapelBy(m).kode || mapelNm(m).slice(0, 10), k: 'm_' + m, n: true, search: false, r: (r) => cellN(r['m_' + m], r.user_id) })))
+        .concat([{ h: 'Rata-rata', k: 'rata', n: true, search: false, r: (r) => `<b>${cellN(r.rata, r.user_id)}</b>` }, { h: 'Status', k: 'rata', sort: false, search: false, r: (r) => r.rata === null ? '<span class="xs muted">Belum ada nilai</span>' : r.rata >= kBy[r.user_id] ? pill('Tuntas', 'ok') : pill('Di bawah KKM', 'err') }]),
         { ph: 'Cari siswa…', per: 50, tools: `<span class="small muted">KKM ${d.kkm} · rata-rata tugas & ujian per mapel</span>` })}
         <div class="card-ft small muted">${d.mapelIds.map((m) => `<b>${esc(mapelBy(m).kode || '')}</b> ${esc(mapelNm(m))}`).join(' · ')}</div></div>`;
     } else if (tab === 'tunggakan') {
@@ -267,7 +268,7 @@ function deleteAgenda(id) {
 route('laporan', {
   title: 'Laporan & Grafik', roles: ['GURU', 'ADMIN'],
   render() {
-    const F = S.c.lapF || (S.c.lapF = { kelas: '', mapel: '', per: '183' }), kkm = cfg().kkm || 75;
+    const F = S.c.lapF || (S.c.lapF = { kelas: '', mapel: '', per: '183' });
     const kelasOpts = myKelasIds();
     const mapelOpts = hasRole('ADMIN') || (me().waliKelas || []).length ? (B().mapel || []).map((m) => m.mapel_id) : uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id);
     const dari = F.per === '0' ? 0 : D.day0(now()) - num(F.per) * 864e5;
@@ -280,12 +281,15 @@ route('laporan', {
     const head = `<div class="page-hd"><div><h1>Laporan & Grafik</h1><p class="sub">Analisis nilai, kehadiran, dan pengumpulan tugas berdasarkan kelas dan mata pelajaran.</p></div></div>`;
     if (!d) return `<div class="page">${head}${filt}<div class="mt16">${ent && ent.err ? emptyState('alert', 'Gagal memuat laporan', esc(ent.err.message)) : skelCards(4, 120)}</div></div>`;
     const withN = d.rows.filter((r) => r.rata !== null), hadirs = d.rows.filter((r) => r.hadir !== null);
-    const rata = avg(withN.map((r) => r.rata)), hadir = avg(hadirs.map((r) => r.hadir)), tot = d.status.sudah + d.status.terlambat + d.status.belum, bawah = withN.filter((r) => r.rata < kkm).length;
+    // KKM per kelas: tiap siswa dibandingkan dengan KKM kelasnya
+    const kOf = (r) => (r.kkm !== undefined && r.kkm !== null ? r.kkm : kkmFor(r.kelas_id)), kList = [...new Set(d.rows.map(kOf))];
+    const kkm = kList.length === 1 ? kList[0] : kkmDef(), kkmLbl = kList.length > 1 ? 'KKM kelas masing-masing' : 'KKM ' + fmtN(kkm);
+    const rata = avg(withN.map((r) => r.rata)), hadir = avg(hadirs.map((r) => r.hadir)), tot = d.status.sudah + d.status.terlambat + d.status.belum, bawah = withN.filter((r) => r.rata < kOf(r)).length;
     const distL = ['< 60', '60–74', '75–84', '85–94', '95–100'];
     return `<div class="page">${head}${filt}
       <div class="grid gc4 mt16">${statCard('Rata-rata nilai', fmtN(rata), '/ 100', `${withN.length} siswa bernilai`, 'star', rata !== null && rata < kkm ? 'warn' : 'p')}${statCard('Rata-rata kehadiran', hadir === null ? '-' : fmtN(hadir) + '%', '', `${hadirs.length} siswa tercatat`, 'user-plus', hadir !== null && hadir < 85 ? 'warn' : 'ok')}${statCard('Pengumpulan tugas', tot ? fmtN((d.status.sudah + d.status.terlambat) / tot * 100) + '%' : '-', '', `${d.status.belum} tertunggak · ${d.status.terlambat} terlambat`, 'clipboard', d.status.belum ? 'warn' : 'ok')}${statCard('Di bawah KKM', bawah, 'siswa', 'KKM ' + kkm, 'alert', bawah ? 'err' : '')}</div>
       <div class="card card-p mt16 banner-info" style="background:linear-gradient(135deg,var(--p50),var(--surface))"><div class="flex items-c g8">${I('sparkles', 'ink-p')}<h3>Analisis Otomatis</h3></div><ul class="small tx2" style="padding-left:18px;line-height:1.8;margin:10px 0 0">${(d.insights.length ? d.insights : ['Belum cukup data untuk dianalisis pada filter ini.']).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
-      <div class="grid gc2 mt16"><div class="card card-p"><h3>Rata-rata Nilai per Kelas</h3><p class="small muted">Garis merah = KKM ${kkm}</p><div class="mt12">${CH.bars(d.perKelas.filter((k) => k.rata !== null).map((k) => ({ l: String(k.nama).split(' ')[0], v: k.rata, c: k.rata < kkm ? '#DC2626' : undefined })), { max: 100, ref: kkm, refLabel: 'KKM ' + kkm, label: 'Rata-rata nilai per kelas' })}</div></div>
+      <div class="grid gc2 mt16"><div class="card card-p"><h3>Rata-rata Nilai per Kelas</h3><p class="small muted">${kList.length > 1 ? 'Batang merah = rata-rata di bawah KKM kelasnya' : 'Garis merah = KKM ' + fmtN(kkm)}</p><div class="mt12">${CH.bars(d.perKelas.filter((k) => k.rata !== null).map((k) => { const kk = k.kkm !== undefined && k.kkm !== null ? k.kkm : kkmFor(k.kelas_id); return { l: String(k.nama).split(' ')[0], v: k.rata, c: k.rata < kk ? '#DC2626' : undefined }; }), Object.assign({ max: 100, label: 'Rata-rata nilai per kelas' }, kList.length > 1 ? {} : { ref: kkm, refLabel: 'KKM ' + fmtN(kkm) }))}</div></div>
         <div class="card card-p"><h3>Tren Kehadiran Bulanan</h3><p class="small muted">Persentase hadir dari presensi per pertemuan</p><div class="mt12">${CH.line(d.hadirBulan.map((b) => ({ l: BLN[+b.bulan.slice(5) - 1] + " '" + b.bulan.slice(2, 4), v: b.pct })), { unit: '%', max: 100, label: 'Tren kehadiran' })}</div></div>
         <div class="card card-p"><h3>Status Pengumpulan Tugas</h3><p class="small muted">${tot} pengumpulan yang diharapkan</p><div class="mt16">${CH.stack([{ l: 'Tepat waktu', v: d.status.sudah, c: '#16A34A' }, { l: 'Terlambat', v: d.status.terlambat, c: '#D97706' }, { l: 'Belum mengumpulkan', v: d.status.belum, c: '#DC2626' }])}</div></div>
         <div class="card card-p"><h3>Sebaran Nilai Siswa</h3><p class="small muted">Jumlah siswa per rentang rata-rata</p><div class="mt12">${CH.bars(d.dist.map((v, i) => ({ l: distL[i], v, c: i < 2 ? '#DC2626' : '#16A34A' })), { h: 220, label: 'Sebaran nilai' })}</div></div></div>
@@ -294,16 +298,16 @@ route('laporan', {
         { h: 'Kelas', k: 'kelas_id', v: (r) => kelasNm(r.kelas_id), r: (r) => esc(kelasShort(r.kelas_id)) },
         { h: 'Tugas', k: 'tugas', n: true, search: false, r: (r) => `<span class="mono">${fmtN(r.tugas)}</span>` },
         { h: 'Ujian', k: 'ujian', n: true, search: false, r: (r) => `<span class="mono">${fmtN(r.ujian)}</span>` },
-        { h: 'Rata-rata', k: 'rata', n: true, search: false, r: (r) => `<b class="mono ${r.rata !== null && r.rata < kkm ? 'ink-err' : ''}">${fmtN(r.rata)}</b>` },
+        { h: 'Rata-rata', k: 'rata', n: true, search: false, r: (r) => `<b class="mono ${r.rata !== null && r.rata < kOf(r) ? 'ink-err' : ''}">${fmtN(r.rata)}</b>` },
         { h: 'Kehadiran', k: 'hadir', n: true, search: false, r: (r) => r.hadir === null ? '-' : `<span class="mono">${fmtN(r.hadir)}%</span>` },
-        { h: 'Status', k: 'rata', sort: false, search: false, r: (r) => r.rata === null ? '<span class="xs muted">Belum ada nilai</span>' : r.rata >= kkm ? pill('Tuntas', 'ok') : pill('Perlu remedial', 'err') }
+        { h: 'Status', k: 'rata', sort: false, search: false, r: (r) => r.rata === null ? '<span class="xs muted">Belum ada nilai</span>' : r.rata >= kOf(r) ? pill('Tuntas', 'ok') : pill('Perlu remedial', 'err') }
       ], { ph: 'Cari nama atau NIS…', sort: 'nama' })}</div></div>`;
   }
 });
 function exportLaporan(key) {
-  const d = S.c[key].d, F = S.c.lapF, kkm = cfg().kkm || 75;
+  const d = S.c[key].d, F = S.c.lapF, kOf = (r) => (r.kkm !== undefined && r.kkm !== null ? r.kkm : kkmFor(r.kelas_id));
   exportXlsx('laporan_' + (F.kelas ? kelasNm(F.kelas).replace(/\W+/g, '_') : 'semua_kelas') + '_' + D.ymd(now()), [
-    { name: 'Rekap Siswa', rows: [['No', 'NIS', 'Nama', 'Kelas', 'Rata Tugas', 'Rata Ujian', 'Rata-rata', '% Kehadiran', 'Status']].concat(d.rows.map((r, i) => [i + 1, r.nis_nip, r.nama, kelasNm(r.kelas_id), r.tugas, r.ujian, r.rata, r.hadir, r.rata === null ? '' : r.rata >= kkm ? 'Tuntas' : 'Remedial'])) },
+    { name: 'Rekap Siswa', rows: [['No', 'NIS', 'Nama', 'Kelas', 'Rata Tugas', 'Rata Ujian', 'Rata-rata', '% Kehadiran', 'Status']].concat(d.rows.map((r, i) => [i + 1, r.nis_nip, r.nama, kelasNm(r.kelas_id), r.tugas, r.ujian, r.rata, r.hadir, r.rata === null ? '' : r.rata >= kOf(r) ? 'Tuntas' : 'Remedial'])) },
     { name: 'Per Kelas', rows: [['Kelas', 'Rata-rata', 'Jumlah siswa bernilai']].concat(d.perKelas.map((k) => [k.nama, k.rata, k.n])) },
     { name: 'Kehadiran Bulanan', rows: [['Bulan', '% Hadir']].concat(d.hadirBulan.map((b) => [b.bulan, b.pct])) },
     { name: 'Analisis', rows: [['Kesimpulan']].concat(d.insights.map((x) => [x])) }]);

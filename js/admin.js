@@ -113,7 +113,7 @@ route('a-users', {
       <div class="seg">${[['AKTIF', 'Aktif'], ['NONAKTIF', 'Nonaktif'], ['', 'Semua']].map((x) => `<button class="${F.status === x[0] ? 'on' : ''}" onclick="S.c.usrF.status='${x[0]}';rerender()">${x[1]}</button>`).join('')}</div>
       <button class="btn btn-ghost btn-sm" onclick='uSelectAll(${JSON.stringify(rows.filter((u) => u.user_id !== me().user_id).map((u) => u.user_id))})'>${I('checkbox', 'ic-sm')}Pilih ${rows.length}</button>`;
     return `<div class="page">${head}
-      ${nSel ? `<div class="card mt16 flex items-c g8 wrap" style="padding:10px 14px;background:var(--p50);border-color:var(--p100)"><b class="small">${nSel} dipilih</b><div class="f1"></div><button class="btn btn-sm btn-secondary" onclick="uBulk('AKTIF')">${I('check-c', 'ic-sm')}Aktifkan</button><button class="btn btn-sm btn-secondary" onclick="uBulk('NONAKTIF')">${I('lock', 'ic-sm')}Nonaktifkan</button>${isS ? `<button class="btn btn-sm btn-secondary" onclick="uBulkKelas(this)">${I('door', 'ic-sm')}Pindah kelas</button>` : ''}<button class="btn btn-sm btn-ghost" onclick="S.c.uSel={};rerender()">Batal</button></div>` : ''}
+      ${nSel ? `<div class="card mt16 flex items-c g8 wrap" style="padding:10px 14px;background:var(--p50);border-color:var(--p100)"><b class="small">${nSel} dipilih</b><div class="f1"></div><button class="btn btn-sm btn-secondary" onclick="uBulk('AKTIF')">${I('check-c', 'ic-sm')}Aktifkan</button><button class="btn btn-sm btn-secondary" onclick="uBulk('NONAKTIF')">${I('lock', 'ic-sm')}Nonaktifkan</button>${isS ? `<button class="btn btn-sm btn-secondary" onclick="uBulkKelas(this)">${I('door', 'ic-sm')}Pindah kelas</button>` : ''}<button class="btn btn-sm btn-danger-o" onclick="uDelete(Object.keys(S.c.uSel).filter((k) => S.c.uSel[k]))">${I('trash', 'ic-sm')}Hapus</button><button class="btn btn-sm btn-ghost" onclick="S.c.uSel={};rerender()">Batal</button></div>` : ''}
       <div class="card mt16">${dataTable('users_' + tab, rows, cols, { ph: 'Cari nama, username, NIS/NIP…', tools, per: 25, onRow: (u) => `openUserForm('${u.user_id}')`, rowCls: (u) => u.status !== 'AKTIF' ? 'muted' : '', emptyT: 'Tidak ada pengguna', emptyD: 'Ubah filter atau tambah pengguna baru.' })}</div></div>`;
   },
   mount() { ROUTES['a-users'].leave = () => { S.c.uSel = {}; }; }
@@ -131,7 +131,46 @@ function uBulkKelas(el) { menuAt(el, kelasReg().map((k) => ({ icon: 'door', labe
 function userMenu(el, id) {
   const u = usersData().users.find((x) => x.user_id === id); if (!u) return;
   menuAt(el, [{ icon: 'edit', label: 'Ubah data', run: () => openUserForm(id) }, { icon: 'key', label: 'Reset kata sandi', run: () => resetPw(id, u.nama) },
-    '-', u.user_id === me().user_id ? { icon: 'info', label: 'Akun Anda sendiri', run: () => {} } : { icon: u.status === 'AKTIF' ? 'lock' : 'unlock', label: u.status === 'AKTIF' ? 'Nonaktifkan akun' : 'Aktifkan kembali', danger: u.status === 'AKTIF', run: () => userStatus(id) }]);
+    '-', u.user_id === me().user_id ? { icon: 'info', label: 'Akun Anda sendiri', run: () => {} } : { icon: u.status === 'AKTIF' ? 'lock' : 'unlock', label: u.status === 'AKTIF' ? 'Nonaktifkan akun' : 'Aktifkan kembali', danger: u.status === 'AKTIF', run: () => userStatus(id) }]
+    .concat(u.user_id === me().user_id ? [] : [{ icon: 'trash', label: 'Hapus akun', danger: true, run: () => uDelete([id]) }]));
+}
+/**
+ * Hapus akun permanen (mis. lulusan / akun nonaktif lama). Server memeriksa dulu (dry):
+ * guru yang masih mengajar/punya ujian & soal ditolak (cukup nonaktifkan); nilai & tugas siswa ikut terhapus
+ * dengan salinan di Drive (Cadangan › Akun Terhapus) dan wajib konfirmasi ketik HAPUS.
+ */
+function uDelete(ids) {
+  ids = [].concat(ids).filter((id) => id && id !== me().user_id);
+  if (!ids.length || srvOld('2.5.0', 'Hapus akun')) return;
+  const wait = sheet({ title: 'Memeriksa akun…', locked: true, body: '<div class="tc" style="padding:24px"><div class="ring" style="border-color:var(--p100);border-top-color:var(--p600);margin:0 auto"></div></div>' });
+  call('users.delete', { ids, dry: true }).then((r) => {
+    wait.close();
+    const ok = r.ok || [], bl = r.blocked || [], withD = ok.filter((x) => x.punya_data);
+    const nm = (x) => `<div class="info-tile"><div class="f1" style="min-width:0"><div class="small bold truncate">${esc(x.nama)} <span class="mono xs muted">@${esc(x.username)}</span></div><div class="xs muted">${esc(String(x.role || '').replace(/,/g, ', ').toLowerCase())}${x.status === 'NONAKTIF' ? ' · nonaktif' : ''}${x.punya_data ? ` · <span class="ink-warn">${x.ujian} nilai ujian, ${x.tugas} pengumpulan tugas</span>` : ''}${x.alasan ? ` · <span class="ink-err">${esc(x.alasan)}</span>` : ''}</div></div></div>`;
+    const blk = bl.length ? `<div class="banner banner-info">${I('info')}<div class="small"><b>${bl.length} akun tidak dihapus</b> — guru yang masih punya jejak mengajar sebaiknya cukup <b>dinonaktifkan</b> agar materi, tugas, dan nilai siswa tetap punya pemilik.</div></div><div class="col g8" style="max-height:180px;overflow:auto">${bl.map(nm).join('')}</div>` : '';
+    if (!ok.length) { sheet({ title: 'Akun tidak bisa dihapus', icon: 'info', body: `<div class="col g12">${blk}</div>`, foot: '<button class="btn btn-primary" data-x2>Mengerti</button>', mount: (el, close) => { el.querySelector('[data-x2]').onclick = close; } }); return; }
+    sheet({ title: `Hapus ${ok.length} akun permanen?`, icon: 'trash', body: `<div class="col g12">
+        <div class="banner banner-warn">${I('alert')}<div class="small">Akun berikut dihapus permanen dan tidak bisa masuk lagi.${withD.length ? ` <b>${withD.length} siswa</b> masih punya nilai ujian/pengumpulan tugas — data itu <b>ikut terhapus</b> dari rekap & leger.` : ''}</div></div>
+        <div class="col g8" style="max-height:240px;overflow:auto">${ok.map(nm).join('')}</div>${blk}
+        <p class="small tx2">${I('shield', 'ic-sm ink-ok')} Salinan data akun ${withD.length ? 'beserta nilai & tugasnya ' : ''}otomatis disimpan ke Google Drive sekolah (folder <b>Cadangan › Akun Terhapus</b>). Riwayat presensi & log aktivitas tetap ada.</p>
+        ${withD.length ? `<div class="field"><label class="label">Ketik <b class="mono">HAPUS</b> untuk konfirmasi</label><input class="input mono" id="uDelTxt" autocomplete="off" placeholder="HAPUS"></div>` : ''}</div>`,
+      foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-danger" id="uDelGo" ${withD.length ? 'disabled' : ''}>${I('trash')}Hapus ${ok.length} Akun</button>`,
+      mount: (el, close) => {
+        el.querySelector('[data-x2]').onclick = close;
+        const inp = $('#uDelTxt', el), go2 = $('#uDelGo', el);
+        if (inp) inp.oninput = () => { go2.disabled = inp.value.trim().toUpperCase() !== 'HAPUS'; };
+        go2.onclick = () => {
+          btnBusy(go2, true, 'Menghapus…');
+          call('users.delete', { ids: ok.map((x) => x.user_id), hapus_data: withD.length > 0 }).then((res) => {
+            const del = {}; (res.ids || []).forEach((id) => { del[id] = 1; });
+            const d = usersData(); if (d) d.users = d.users.filter((u) => !del[u.user_id]);
+            S.c.uSel = {}; close(); rerender(); drop('wr_'); drop('lap_'); drop('res_');
+            toast(`${res.deleted} akun dihapus${res.cadangan ? ' · salinan nilai di Drive (Cadangan › Akun Terhapus)' : ''}.`, 'ok', 7000);
+            refreshBoot(true).catch(() => {});
+          }).catch((e) => { btnBusy(go2, false); failToast(e); });
+        };
+      } });
+  }).catch((e) => { wait.close(); failToast(e); });
 }
 function userStatus(id) {
   const u = usersData().users.find((x) => x.user_id === id), old = u.status, nw = old === 'AKTIF' ? 'NONAKTIF' : 'AKTIF';
@@ -323,8 +362,9 @@ route('a-akademik', {
         { h: 'Wali / pembina', k: 'wali', r: (k) => k.wali ? `<div class="flex items-c g8">${avatar(k.wali, '', 'sm')}<span class="small bold">${esc(k.wali)}</span></div>` : `<button class="btn btn-ghost btn-sm ink-warn" onclick="event.stopPropagation();openKelasForm('${k.kelas_id}')">${I('plus', 'ic-sm')}Tetapkan wali</button>` },
         { h: 'Siswa', k: 'kelas_id', n: true, search: false, v: (k) => nS[k.kelas_id] || 0, r: (k) => `<span class="mono">${nS[k.kelas_id] || 0}</span>` },
         { h: 'Mapel diajar', k: 'tingkat', n: true, search: false, v: (k) => G().penugasan.filter((x) => x.kelas_id === k.kelas_id).length, r: (k) => `<span class="mono">${G().penugasan.filter((x) => x.kelas_id === k.kelas_id).length}</span>` },
+        { h: 'KKM', k: 'kkm', n: true, search: false, v: (k) => kkmFor('', k.kelas_id), r: (k) => k.kkm !== '' && k.kkm !== undefined && k.kkm !== null ? `<b class="mono">${fmtN(k.kkm)}</b>` : `<span class="mono muted" title="Mengikuti KKM bawaan di Pengaturan">${fmtN(kkmDef())}*</span>` },
         { h: '', sort: false, search: false, r: (k) => `<div class="flex g4 jc-e"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();go('w-kelas',{kelas_id:'${k.kelas_id}'})">${I('chart', 'ic-sm')}Rekap</button><button class="icon-btn" onclick="event.stopPropagation();openKelasForm('${k.kelas_id}')" title="Ubah">${I('edit')}</button><button class="icon-btn ink-err" onclick="event.stopPropagation();delMaster('kelas','${k.kelas_id}')" title="Hapus">${I('trash')}</button></div>` }
-      ], { ph: 'Cari kelas atau wali…', per: 40, onRow: (k) => `openKelasForm('${k.kelas_id}')`, tools: `<button class="btn btn-secondary btn-sm" onclick="openKelasForm(null,'ESKUL')">${I('plus', 'ic-sm')}Eskul / Pengayaan</button><button class="btn btn-primary btn-sm" onclick="openKelasForm(null)">${I('plus', 'ic-sm')}Tambah Rombel</button>` })}</div>`;
+      ], { ph: 'Cari kelas atau wali…', per: 40, onRow: (k) => `openKelasForm('${k.kelas_id}')`, tools: `<button class="btn btn-ghost btn-sm" onclick="openKkmKelas()" title="KKM / KKTP per kelas">${I('star', 'ic-sm')}Atur KKM</button><button class="btn btn-secondary btn-sm" onclick="openKelasForm(null,'ESKUL')">${I('plus', 'ic-sm')}Eskul / Pengayaan</button><button class="btn btn-primary btn-sm" onclick="openKelasForm(null)">${I('plus', 'ic-sm')}Tambah Rombel</button>` })}</div>`;
     else if (tab === 'mapel') body = `<div class="flex jc-e mb12"><button class="btn btn-primary" onclick="openMapelForm(null)">${I('plus')}Tambah Mapel</button></div><div class="mapel-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${mapel.map((m) => `<button class="mapel-tile" onclick="openMapelForm('${m.mapel_id}')">${mapelIcon(m.mapel_id)}<span class="nm">${esc(m.nama_mapel)}</span><span class="gr mono">${esc(m.kode || '-')} · ${G().penugasan.filter((x) => x.mapel_id === m.mapel_id).length} kelas</span></button>`).join('') || emptyState('book', 'Belum ada mapel', '')}</div>`;
     else {
       const gurus = (B().gurus || []).slice().sort(by('nama')), byG = {}; G().penugasan.forEach((x) => { (byG[x.guru_id] = byG[x.guru_id] || []).push(x); });
@@ -360,6 +400,40 @@ function taActivate(id) {
  * Formulir kelas. Jenis REGULER = rombel biasa (kelas asal siswa).
  * ESKUL / PENGAYAAN = kelas gabungan: anggota diambil dari seluruh siswa rombel terpilih dan/atau siswa pilihan.
  */
+/** KKM / KKTP per kelas: isi banyak kelas sekaligus. Kosong = ikut KKM bawaan. */
+function openKkmKelas() {
+  const tk = (k) => ({ X: 1, XI: 2, XII: 3 })[k.tingkat] || 9;
+  const list = (B().kelas || []).slice().sort((a, b) => (isKhusus(a) - isKhusus(b)) || tk(a) - tk(b) || String(a.nama_kelas).localeCompare(String(b.nama_kelas), 'id', { numeric: true }));
+  const V = {}; list.forEach((k) => { V[k.kelas_id] = k.kkm === undefined || k.kkm === null ? '' : String(k.kkm); });
+  const row = (k) => `<div class="flex items-c g12" style="padding:8px 0;border-bottom:1px solid var(--border)"><div class="f1" style="min-width:0"><div class="bold small truncate">${esc(k.nama_kelas)} ${kelasPill(k)}</div><div class="xs muted">${isKhusus(k) ? esc(JENIS_KELAS[k.jenis] || '') : 'Tingkat ' + esc(k.tingkat || '-')}${k.wali ? ' · ' + esc(k.wali) : ''}</div></div>
+    <input class="input mono" data-kk="${k.kelas_id}" type="number" min="0" max="100" step="0.5" style="width:120px;text-align:center" value="${esc(V[k.kelas_id])}" placeholder="${fmtN(kkmDef())}"></div>`;
+  const s = sheet({ title: 'KKM / KKTP per Kelas', icon: 'star', size: 'wide',
+    body: `<p class="small tx2">Isi KKM/KKTP tiap kelas. Kolom kosong mengikuti KKM bawaan (<b>${fmtN(kkmDef())}</b>) di Pengaturan → Aturan Ujian. Dipakai untuk status tuntas/remedial di hasil ujian, penilaian tugas, leger wali kelas, laporan, dan kartu nilai siswa.</p>
+      <div class="card card-p mt12 flex items-c g8 wrap" style="background:var(--subtle)"><span class="small bold">Isi cepat:</span><select class="select input-sm" id="kkT" style="width:150px"><option value="">Semua kelas</option>${['X', 'XI', 'XII'].map((t) => `<option value="${t}">Tingkat ${t}</option>`).join('')}</select><input class="input input-sm mono" id="kkV" type="number" min="0" max="100" step="0.5" style="width:90px" placeholder="mis. 78"><button type="button" class="btn btn-secondary btn-sm" id="kkFill">${I('check', 'ic-sm')}Terapkan</button></div>
+      <div class="mt12" id="kkList">${list.map(row).join('') || emptyState('door', 'Belum ada kelas', 'Tambahkan kelas di Data Akademik.')}</div>`,
+    foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-primary" id="kkOk">${I('check')}Simpan KKM</button>`,
+    mount: (el, close) => {
+      el.querySelector('[data-x2]').onclick = close;
+      $('#kkFill', el).onclick = () => {
+        const t = $('#kkT', el).value, v = $('#kkV', el).value.trim();
+        if (v !== '' && !(Number(v) >= 0 && Number(v) <= 100)) { toast('KKM harus angka 0–100.', 'warn'); return; }
+        list.forEach((k) => { if (!t || k.tingkat === t) { const inp = $(`[data-kk="${k.kelas_id}"]`, el); if (inp) inp.value = v; } });
+      };
+      $('#kkOk', el).onclick = () => {
+        const items = [], bad = [];
+        $$('[data-kk]', el).forEach((inp) => { const v = inp.value.trim(), id = inp.dataset.kk; if (v !== '' && !(Number(v) >= 0 && Number(v) <= 100)) bad.push(id); else if (v !== V[id]) items.push({ kelas_id: id, kkm: v }); });
+        if (bad.length) { toast('KKM harus angka 0–100.', 'warn'); return; }
+        if (!items.length) { close(); return; }
+        const btn = $('#kkOk', el); btnBusy(btn, true, 'Menyimpan…');
+        call('kelas.kkm', { items }).then((r) => {
+          const by = {}; r.kelas.forEach((k) => { by[k.kelas_id] = k; });
+          (B().kelas || []).forEach((k, i, a) => { if (by[k.kelas_id]) a[i] = Object.assign({}, k, by[k.kelas_id]); });
+          saveSnap(); close(); drop('wr_'); drop('lap_'); drop('res_'); rerender(); toast('KKM ' + r.updated + ' kelas disimpan.', 'ok');
+        }).catch((e) => { btnBusy(btn, false); failToast(e); });
+      };
+    } });
+  return s;
+}
 function openKelasForm(id, jenis0) {
   const k = id ? (B().kelas || []).find((x) => x.kelas_id === id) : null, waliOf = {};
   (B().kelas || []).forEach((x) => { if (x.wali_kelas_id && !isKhusus(x)) waliOf[x.wali_kelas_id] = x.nama_kelas; });
@@ -368,7 +442,7 @@ function openKelasForm(id, jenis0) {
   const s = sheet({ title: k ? 'Ubah Kelas ' + esc(k.nama_kelas) : W.jenis === 'REGULER' ? 'Tambah Rombel' : 'Tambah Kelas Eskul / Pengayaan', icon: 'door', size: 'wide', body: `<form id="kF" onsubmit="return false"><div id="kBox" class="col g16"></div></form>`,
     foot: `${k ? `<button class="btn btn-danger-o" onclick="closeAllSheets();delMaster('kelas','${k.kelas_id}')">${I('trash')}</button>` : ''}<button class="btn btn-primary" id="kOk">${I('check')}Simpan Kelas</button>`,
     mount: (el, close) => {
-      const keep = () => { const f = $('#kF', el); W.nama = f.nama_kelas ? f.nama_kelas.value : W.nama; W.tingkat = f.tingkat ? f.tingkat.value : W.tingkat; W.wali = f.wali_kelas_id ? f.wali_kelas_id.value : W.wali; W.ket = f.keterangan ? f.keterangan.value : W.ket; };
+      const keep = () => { const f = $('#kF', el); W.nama = f.nama_kelas ? f.nama_kelas.value : W.nama; W.tingkat = f.tingkat ? f.tingkat.value : W.tingkat; W.wali = f.wali_kelas_id ? f.wali_kelas_id.value : W.wali; W.ket = f.keterangan ? f.keterangan.value : W.ket; W.kkm = f.kkm ? f.kkm.value.trim() : W.kkm; };
       const members = () => { const set = {}; siswaAll.forEach((x) => { if (W.src.indexOf(x.kelas_id) >= 0 || W.ang.indexOf(x.user_id) >= 0) set[x.user_id] = 1; }); return Object.keys(set).length; };
       const drawList = () => {
         const box = $('#kList', el); if (!box) return;
@@ -384,6 +458,7 @@ function openKelasForm(id, jenis0) {
             <div class="field"><label class="label">Tingkat${kh ? ' (opsional)' : ''}</label><select class="select" name="tingkat">${(kh ? [''] : []).concat(['X', 'XI', 'XII']).map((t) => `<option value="${t}" ${(W.tingkat !== undefined ? W.tingkat : k ? k.tingkat : '') === t ? 'selected' : ''}>${t || 'Campuran'}</option>`).join('')}</select></div></div>
           <div class="field"><label class="label">${kh ? 'Pembina / guru penanggung jawab' : 'Wali kelas'}</label><select class="select" name="wali_kelas_id"><option value="">— ${kh ? 'Belum ada pembina' : 'Belum ada wali'} —</option>${(B().gurus || []).slice().sort(by('nama')).map((g) => { const lock = !kh && waliOf[g.user_id] && (!k || k.wali_kelas_id !== g.user_id); return `<option value="${g.user_id}" ${wl === g.user_id ? 'selected' : ''} ${lock ? 'disabled' : ''}>${esc(g.nama)}${lock ? ' (wali ' + esc(waliOf[g.user_id]) + ')' : ''}</option>`; }).join('')}</select>
             <div class="help">${kh ? 'Pembina mendapat menu kelas binaan (rekap presensi & nilai anggota). Pembina tidak bisa mengubah akun siswa dari rombel lain.' : 'Guru yang ditetapkan otomatis mendapat menu Wali Kelas. Satu guru hanya untuk satu rombel.'}</div></div>
+          <div class="field"><label class="label">KKM / KKTP kelas</label><input class="input" name="kkm" type="number" min="0" max="100" step="0.5" style="max-width:220px" value="${esc(W.kkm !== undefined ? W.kkm : k && k.kkm !== undefined ? k.kkm : '')}" placeholder="Ikuti bawaan (${fmtN(kkmDef())})"><div class="help">Kosongkan untuk mengikuti KKM bawaan di Pengaturan.</div></div>
           ${kh ? `<div class="field"><label class="label">Keterangan (opsional)</label><input class="input" name="keterangan" maxlength="200" value="${esc(W.ket !== undefined ? W.ket : k ? k.keterangan || '' : '')}" placeholder="mis. Latihan Sabtu 07.30 di lapangan"></div>
           <div class="field"><label class="label">Ambil seluruh siswa dari rombel</label><div class="chips">${kelasReg().slice().sort(by('nama_kelas')).map((x) => `<button type="button" class="chip ${W.src.indexOf(x.kelas_id) >= 0 ? 'sel-o' : ''}" data-src="${x.kelas_id}">${W.src.indexOf(x.kelas_id) >= 0 ? I('check', 'ic-sm') : ''}${esc(x.nama_kelas)}</button>`).join('')}</div><div class="help">Siswa baru di rombel ini otomatis ikut menjadi anggota.</div></div>
           <div class="field"><label class="label">Tambah siswa tertentu</label>
@@ -399,8 +474,9 @@ function openKelasForm(id, jenis0) {
         keep(); const kh = W.jenis !== 'REGULER', btn = $('#kOk', el);
         if (!String(W.nama || '').trim()) { toast('Isi nama kelas.', 'warn'); return; }
         if (kh && !W.src.length && !W.ang.length) { toast('Pilih rombel sumber atau minimal satu siswa.', 'warn'); return; }
+        if (W.kkm !== undefined && W.kkm !== '' && !(Number(W.kkm) >= 0 && Number(W.kkm) <= 100)) { toast('KKM harus angka 0–100.', 'warn'); return; }
         btnBusy(btn, true, 'Menyimpan…');
-        call('kelas.save', { kelas_id: id || '', nama_kelas: W.nama.trim(), tingkat: W.tingkat || '', wali_kelas_id: W.wali || '', jenis: W.jenis, sumber_kelas_ids: kh ? W.src : [], anggota_ids: kh ? W.ang : [], keterangan: W.ket || '' }).then((r) => {
+        call('kelas.save', { kelas_id: id || '', nama_kelas: W.nama.trim(), tingkat: W.tingkat || '', wali_kelas_id: W.wali || '', jenis: W.jenis, sumber_kelas_ids: kh ? W.src : [], anggota_ids: kh ? W.ang : [], keterangan: W.ket || '', kkm: W.kkm !== undefined ? W.kkm : (k ? k.kkm : '') }).then((r) => {
           const l = B().kelas, i = l.findIndex((x) => x.kelas_id === r.kelas_id);
           if (i >= 0) l[i] = r; else l.push(r); saveSnap(); close(); renderChrome(); rerender(); toast('Kelas ' + r.nama_kelas + ' disimpan' + (isKhusus(r) ? ' (' + r.jml + ' anggota)' : '') + '.', 'ok');
           refreshBoot(true).catch(() => {});   // peran wali/pembina & daftar siswa ikut diperbarui
@@ -478,7 +554,7 @@ route('a-settings', {
               <div class="flex g8"><span class="pill pill-p">Fisika</span><span class="pill" style="background:var(--acc);color:var(--acc-ink)">Aksen</span></div></div></div></div></div></div>`;
     else if (tab === 'ujian') body = `<div class="card card-p" style="max-width:760px"><h3>Aturan Bawaan Ujian CBT</h3><p class="small muted mt4">Berlaku untuk ujian yang memakai pengaturan "Ikuti global". Guru masih bisa mengubah per ujian.</p>
         <div class="mt12">${sw('wajib_token', 'Wajibkan token untuk ujian baru', 'Peserta memasukkan token dari pengawas sebelum mulai', 'key')}${sw('tampilkan_nilai', 'Tampilkan nilai setelah selesai', 'Nilai pilihan ganda langsung tampil ke siswa', 'eye')}</div>
-        <div class="form-grid c2 mt16">${inp('batas_pelanggaran', 'Batas pelanggaran sebelum terkunci', 'type="number" min="1" max="20"', 'Pindah tab / keluar layar penuh dihitung satu pelanggaran.')}${inp('toleransi_selesai', 'Tombol Selesai aktif (menit sebelum waktu habis)', 'type="number" min="0" max="600"', 'Contoh: durasi 60 menit, isi 15 → siswa bisa mengirim mulai menit ke-45. Isi 0 = boleh kapan saja.')}${inp('kkm', 'KKM / KKTP', 'type="number" min="0" max="100"', 'Dipakai di hasil ujian, leger, dan laporan.')}${inp('jam_buka_default', 'Jam buka bawaan', 'type="time"')}${inp('jam_tutup_default', 'Jam tutup bawaan', 'type="time"')}</div></div>`;
+        <div class="form-grid c2 mt16">${inp('batas_pelanggaran', 'Batas pelanggaran sebelum terkunci', 'type="number" min="1" max="20"', 'Pindah tab / keluar layar penuh dihitung satu pelanggaran.')}${inp('toleransi_selesai', 'Tombol Selesai aktif (menit sebelum waktu habis)', 'type="number" min="0" max="600"', 'Contoh: durasi 60 menit, isi 15 → siswa bisa mengirim mulai menit ke-45. Isi 0 = boleh kapan saja.')}${inp('kkm', 'KKM / KKTP bawaan', 'type="number" min="0" max="100"', 'Dipakai untuk kelas yang belum punya KKM sendiri (hasil ujian, leger, laporan). <a href="javascript:void(0)" class="bold" onclick="openKkmKelas()">Atur KKM / KKTP per kelas →</a>')}${inp('jam_buka_default', 'Jam buka bawaan', 'type="time"')}${inp('jam_tutup_default', 'Jam tutup bawaan', 'type="time"')}</div></div>`;
     else if (tab === 'notif') body = `<div class="grid gc2"><div class="card card-p"><h3>Pengingat Otomatis</h3><p class="small muted mt4">Dikirim setiap hari ke siswa yang belum mengumpulkan tugas (tenggat ≤ 2 hari) atau ujian yang akan dibuka.</p>
           <div class="field mt16"><label class="label">Jam pengiriman (${TZL || 'WIB'})</label><select class="select" data-s="jam_pengingat">${Array.from({ length: 24 }).map((x, h) => `<option value="${h}" ${String(E.jam_pengingat) === String(h) ? 'selected' : ''}>${pad(h)}.00</option>`).join('')}</select></div>
           <div class="mt12">${sw('email_aktif', 'Email', 'Lewat Gmail akun pemilik skrip (kuota harian Google berlaku)', 'mail')}${sw('wa_aktif', 'WhatsApp', 'Lewat layanan gateway Fonnte atau Wablas', 'wa')}</div></div>

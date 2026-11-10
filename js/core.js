@@ -513,6 +513,11 @@ const driveIdOf = (u) => { const m = String(u || '').match(/[?&]id=([-\w]{20,})|
  * Gambar soal: bila tautan Google Drive gagal dibuka di perangkat ini (berkas tidak publik, akun Google lain,
  * pemblokiran cookie), gambar diambil lewat server aplikasi lalu disimpan di memori (IMGD) untuk tampilan berikutnya.
  */
+/** KKM/KKTP: milik kelas (diatur Admin) → KKM bawaan di Pengaturan. target = kelas sasaran (mis. eskul) bila punya KKM sendiri. */
+const kkmOwn = (kid) => { const k = kid ? (B().kelas || []).find((x) => x.kelas_id === kid) : null, v = k && k.kkm !== '' && k.kkm !== null && k.kkm !== undefined ? Number(k.kkm) : NaN; return isFinite(v) ? v : null; };
+const kkmDef = () => num(cfg().kkm, 75);
+function kkmFor(kelasId, target) { const t = target ? kkmOwn(target) : null; if (t !== null) return t; const v = kkmOwn(kelasId); return v !== null ? v : kkmDef(); }
+const myKkm = () => kkmFor(me().kelas_id);
 const IMGD = {}, IMGP = {};
 let IMG_VIA_APP = false;
 function soalImg(id) {

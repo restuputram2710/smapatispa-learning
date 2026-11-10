@@ -92,7 +92,7 @@ route('s-home', {
 });
 /** Nilai ulangan siswa di beranda: rata-rata, tertinggi, tren, dan daftar ulangan terbaru — penyemangat belajar. */
 function homeNilai(sw) {
-  const kkm = num(cfg().kkm, 75) || 75;
+  const kkm = myKkm();
   const done = sw.ulangan.filter((u) => u.my && (u.my.status === 'SELESAI' || u.my.status === 'TERKUNCI')).sort((a, b) => (num(b.my.selesai) || b.buka) - (num(a.my.selesai) || a.buka));
   if (!done.length) return '';
   const graded = done.filter((u) => u.my.nilai !== null && u.my.nilai !== undefined && u.my.status_nilai !== 'MENUNGGU_KOREKSI');
@@ -223,7 +223,7 @@ route('s-tugas-d', {
       </div>
       <div class="card card-p mt16"><h3 class="mb8">Instruksi</h3><div class="pre tx2">${esc(t.instruksi)}</div>
         ${(t.lampiran || []).length ? `<div class="col g8 mt16">${t.lampiran.map((id, i) => `<button class="file-chip" onclick="previewPublic('Lampiran ${i + 1}','${id}')"><div class="tile err">${I('file-text')}</div><div class="f1 bold" style="text-align:left">Lampiran ${i + 1}</div>${I('eye', 'muted')}</button>`).join('')}</div>` : ''}</div>
-      ${graded && mine ? `<div class="card card-p mt16"><div class="flex items-c g24 wrap">${CH.ring(mine.nilai, t.nilai_maks, { text: fmtN(mine.nilai), c: mine.nilai / t.nilai_maks >= cfg().kkm / 100 ? '#16A34A' : '#D97706' })}<div class="f1" style="min-width:220px"><div class="small muted">Nilai dari guru · maks ${t.nilai_maks}</div><h2 class="mt4">${mine.nilai / t.nilai_maks * 100 >= (cfg().kkm || 75) ? 'Tuntas' : 'Perlu perbaikan'}</h2>${mine.komentar ? `<div class="banner banner-info mt12">${I('message')}<div><b>Komentar guru</b><div class="pre mt4">${esc(mine.komentar)}</div></div></div>` : ''}</div></div></div>` : ''}
+      ${graded && mine ? `<div class="card card-p mt16"><div class="flex items-c g24 wrap">${CH.ring(mine.nilai, t.nilai_maks, { text: fmtN(mine.nilai), c: mine.nilai / t.nilai_maks >= kkmFor(me().kelas_id, t.kelas_id) / 100 ? '#16A34A' : '#D97706' })}<div class="f1" style="min-width:220px"><div class="small muted">Nilai dari guru · maks ${t.nilai_maks}</div><h2 class="mt4">${mine.nilai / t.nilai_maks * 100 >= kkmFor(me().kelas_id, t.kelas_id) ? 'Tuntas' : 'Perlu perbaikan'}</h2>${mine.komentar ? `<div class="banner banner-info mt12">${I('message')}<div><b>Komentar guru</b><div class="pre mt4">${esc(mine.komentar)}</div></div></div>` : ''}</div></div></div>` : ''}
       ${late && !t.my ? `<div class="banner ${t.izinkan_terlambat ? 'banner-warn' : 'banner-err'} mt16">${I('alert')}<div>${t.izinkan_terlambat ? 'Tenggat sudah lewat. Pengumpulan tetap bisa, tetapi ditandai <b>Terlambat</b>.' : 'Tenggat sudah lewat dan guru tidak menerima pengumpulan terlambat.'}</div></div>` : ''}
       <div class="card card-p mt16"><div class="flex items-c jc-b"><h3>Jawaban Saya</h3>${t.my ? `<span class="small muted">Dikumpulkan ${D.rel(t.my.waktu_kumpul)}</span>` : ''}</div>
         ${t.my && !mine ? `<div class="mt12">${skel(80)}</div>` : `
@@ -722,7 +722,7 @@ function exitExam(silent) {
 function showResult(r, u) {
   const show = r.show && r.nilaiObj !== null && r.nilaiObj !== undefined;
   sheet({ title: '', size: '', body: `<div class="tc"><div class="tile lg ok" style="margin:0 auto;width:68px;height:68px">${I('check-c', 'ic-xl')}</div><h2 class="mt12">Jawaban Terkirim</h2><p class="muted small">${esc(u.judul)}</p>
-    ${show ? `<div class="mt16">${CH.ring(r.nilaiObj, 100, { c: r.nilaiObj >= (cfg().kkm || 75) ? '#16A34A' : '#D97706' })}</div><div class="small muted mt4">${r.adaEsai ? 'Nilai pilihan ganda' : 'Nilai akhir'}</div>
+    ${show ? `<div class="mt16">${CH.ring(r.nilaiObj, 100, { c: r.nilaiObj >= myKkm() ? '#16A34A' : '#D97706' })}</div><div class="small muted mt4">${r.adaEsai ? 'Nilai pilihan ganda' : 'Nilai akhir'}</div>
       <div class="grid gc3 mt16" style="grid-template-columns:repeat(3,1fr)"><div class="card" style="padding:10px"><div class="xs muted">Benar</div><div class="b7 ink-ok">${r.benar}</div></div><div class="card" style="padding:10px"><div class="xs muted">Salah</div><div class="b7 ink-err">${r.salah}</div></div><div class="card" style="padding:10px"><div class="xs muted">Durasi</div><div class="b7">${r.selesai && r.mulai ? Math.round((r.selesai - r.mulai) / 60000) + ' mnt' : '-'}</div></div></div>` : `<div class="banner banner-info mt16">${I('info')}<div>Nilai akan diumumkan oleh guru.</div></div>`}
     ${r.adaEsai && r.status_nilai === 'MENUNGGU_KOREKSI' ? `<div class="banner banner-vio mt16" style="text-align:left">${I('pen')}<div>Nilai esai menunggu koreksi guru — nilai akhir menyusul.</div></div>` : ''}
     ${r.status === 'TERKUNCI' ? `<div class="banner banner-warn mt16" style="text-align:left">${I('lock')}<div>Ujian terkunci karena pelanggaran. Jawaban terakhir sudah tersimpan.</div></div>` : ''}</div>`,

@@ -228,21 +228,22 @@ route('g-tugas', {
 function gradePanel(t, s, d) {
   const k = s.kumpul, idx = d.siswa.indexOf(s), withK = d.siswa.filter((x) => x.kumpul), pos = withK.indexOf(s);
   const next = withK[pos + 1], prev = withK[pos - 1], canGrade = hasRole('GURU') || hasRole('ADMIN');
+  const kkmS = kkmFor(s.kelas_id, t.kelas_id || (G().penugasan.find((x) => x.penugasan_id === t.penugasan_id) || {}).kelas_id);
   const head = `<div class="card card-p flex items-c g12 wrap">${avatar(s.nama, s.foto, 'lg')}<div class="f1" style="min-width:0"><div class="flex items-c g8 wrap"><h3>${esc(s.nama)}</h3><span class="pill pill-info mono">Kelas ${esc(kelasShort(s.kelas_id))}</span></div><div class="mono small muted">NIS: ${esc(s.nis_nip)} · Urutan ${idx + 1}/${d.siswa.length}</div></div>
     <div class="flex g8"><button class="btn btn-secondary btn-sm" ${prev ? `onclick="go('g-tugas',Object.assign({},S.params,{sid:'${prev.user_id}'}),{replace:true})"` : 'disabled'}>${I('chev-l', 'ic-sm')}Sebelumnya</button><button class="btn btn-secondary btn-sm" ${next ? `onclick="go('g-tugas',Object.assign({},S.params,{sid:'${next.user_id}'}),{replace:true})"` : 'disabled'}>Berikutnya${I('chev-r', 'ic-sm')}</button></div></div>`;
   if (!k) return `${head}<div class="card mt16">${emptyState('inbox', 'Belum mengumpulkan', 'Siswa ini belum mengumpulkan tugas. Kirim pengingat dari tombol di atas.')}</div>`;
   return `${head}<div class="card card-p mt16"><div class="flex items-c g12 wrap jc-b"><span class="flex items-c g8">${I('check-c', 'ink-ok')}Waktu kirim: <b>${D.dt(k.waktu_kumpul)}</b></span>${k.terlambat ? pill('Terlambat', 'warn') : pill('Tepat waktu', 'ok')}</div>
       ${k.teks ? `<div class="card mt16" style="padding:14px;background:var(--subtle)"><div class="xs bold upper muted mb8">Jawaban / catatan siswa</div><div class="pre">${esc(k.teks)}</div></div>` : ''}
       ${(k.file_ids || []).map((id, i) => `<div class="file-chip mt12"><div class="tile err">${I('file-text')}</div><div class="f1 bold small">Berkas ${i + 1}</div><button class="btn btn-secondary btn-sm" onclick="previewPrivate('${k.kumpul_id}','${id}','Berkas ${i + 1} — ${esc(s.nama).replace(/'/g, '')}')">${I('eye', 'ic-sm')}Lihat Dokumen</button></div>`).join('')}</div>
-    ${canGrade ? `<div class="card card-p mt16"><div class="flex items-c jc-b"><h3 class="flex items-c g8">${I('star', 'ink-p')}Formulir Penilaian</h3><span class="small muted">KKM: ${cfg().kkm || 75}</span></div>
-      <div class="flex items-c g12 mt16 wrap card" style="padding:14px;background:var(--subtle)"><span class="bold">Skor Perolehan:</span><input class="input mono" id="gScore" type="number" min="0" max="${t.nilai_maks}" step="0.5" value="${k.nilai !== null && k.nilai !== undefined ? k.nilai : ''}" style="width:110px;height:52px;font-size:24px;text-align:center;font-weight:600;border:2px solid var(--p600)" autofocus><span class="mono" style="font-size:22px">/ ${t.nilai_maks}</span><span id="gTuntas"></span></div>
+    ${canGrade ? `<div class="card card-p mt16"><div class="flex items-c jc-b"><h3 class="flex items-c g8">${I('star', 'ink-p')}Formulir Penilaian</h3><span class="small muted">KKM: ${fmtN(kkmS)}</span></div>
+      <div class="flex items-c g12 mt16 wrap card" style="padding:14px;background:var(--subtle)"><span class="bold">Skor Perolehan:</span><input class="input mono" id="gScore" data-kkm="${kkmS}" type="number" min="0" max="${t.nilai_maks}" step="0.5" value="${k.nilai !== null && k.nilai !== undefined ? k.nilai : ''}" style="width:110px;height:52px;font-size:24px;text-align:center;font-weight:600;border:2px solid var(--p600)" autofocus><span class="mono" style="font-size:22px">/ ${t.nilai_maks}</span><span id="gTuntas"></span></div>
       <div class="xs bold upper muted mt16 mb8">Nilai cepat</div><div class="chips">${[100, 90, 85, 80, 75, 70, 60].map((v) => `<button class="chip" onclick="$('#gScore').value=${Math.round(v * t.nilai_maks / 100)};gTuntas(${t.nilai_maks})">${Math.round(v * t.nilai_maks / 100)}</button>`).join('')}</div>
       <div class="field mt16"><label class="label">Catatan & Umpan Balik Guru</label><textarea class="textarea" id="gComment" placeholder="Tuliskan umpan balik untuk siswa…">${esc(k.komentar || '')}</textarea></div>
       <label class="check mt12"><input type="checkbox" id="gNotif" checked>Kirim notifikasi nilai langsung ke siswa</label>
       <div class="flex g8 mt16 jc-e wrap"><button class="btn btn-primary btn-lg" id="gSave" onclick="saveGrade('${t.tugas_id}','${s.user_id}','${next ? next.user_id : ''}')">${I('check-c')}${next ? 'Simpan Nilai & Lanjut ke Siswa Berikutnya' : 'Simpan Nilai'}${next ? I('arrow-r') : ''}</button></div>
       <p class="kbd-hint tr mt8">Pintasan: <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span></p></div>` : ''}`;
 }
-function gTuntas(maks) { const v = num($('#gScore').value, NaN), el = $('#gTuntas'); if (!el) return; el.innerHTML = isNaN(v) ? '' : v / maks * 100 >= (cfg().kkm || 75) ? pill('Tuntas (di atas KKM)', 'ok') : pill('Belum tuntas', 'warn'); }
+function gTuntas(maks) { const sc = $('#gScore'), v = num(sc.value, NaN), el = $('#gTuntas'), kkm = num(sc.dataset.kkm, kkmDef()); if (!el) return; el.innerHTML = isNaN(v) ? '' : v / maks * 100 >= kkm ? pill('Tuntas (di atas KKM)', 'ok') : pill('Belum tuntas', 'warn'); }
 ROUTES['g-tugas'].mount = (p) => {
   const sc = $('#gScore'); if (!sc) return;
   const t = G().tugas.find((x) => x.tugas_id === p.id) || (S.c['td_' + p.id] && S.c['td_' + p.id].d.tugas);
@@ -1035,9 +1036,12 @@ route('g-hasil', {
   render(p) {
     const d = need('res_' + p.id, 'ulangan.results', { ulangan_id: p.id }, 30000);
     if (!d) return skelPage();
-    const u = d.ulangan, F = S.c.resF || (S.c.resF = { kelas: '', tab: 'rekap' }), kkm = d.kkm;
+    const u = d.ulangan, F = S.c.resF || (S.c.resF = { kelas: '', tab: 'rekap' });
     const rows = d.rows.filter((r) => !F.kelas || r.kelas_id === F.kelas), nas = rows.map((r) => r.na);
-    const st = { n: rows.length, avg: avg(nas), max: nas.length ? Math.max(...nas) : 0, min: nas.length ? Math.min(...nas) : 0, tuntas: nas.filter((x) => x >= kkm).length };
+    // KKM per kelas: tiap siswa dinilai dengan KKM kelasnya (r.kkm); angka ringkasan memakai KKM bersama bila sama
+    const kOf = (r) => (r.kkm !== undefined && r.kkm !== null ? r.kkm : d.kkm), kList = [...new Set(rows.map(kOf))];
+    const kkm = kList.length === 1 ? kList[0] : (F.kelas && d.kkmKelas ? d.kkmKelas[F.kelas] : d.kkm) || d.kkm, kkmLbl = kList.length > 1 ? 'KKM kelasnya' : 'KKM ' + fmtN(kkm);
+    const st = { n: rows.length, avg: avg(nas), max: nas.length ? Math.max(...nas) : 0, min: nas.length ? Math.min(...nas) : 0, tuntas: rows.filter((r) => r.na >= kOf(r)).length };
     const top = rows[0], bins = [[0, 60, '< 60'], [60, 75, '60–74'], [75, 85, '75–84'], [85, 95, '85–94'], [95, 101, '95–100']].map((b) => ({ l: b[2], v: nas.filter((x) => x >= b[0] && x < b[1]).length, c: b[0] < kkm ? '#DC2626' : '#16A34A' }));
     const diff = (pct) => pct >= 70 ? ['Mudah', 'ok'] : pct >= 30 ? ['Sedang', 'info'] : ['Sukar', 'err'];
     return `<div class="page"><button class="back-link" onclick="back('g-ujian')">${I('arrow-l', 'ic-sm')}Kembali</button>
@@ -1045,8 +1049,8 @@ route('g-hasil', {
         <div class="flex g8 wrap">${d.stats.koreksi ? `<button class="btn btn-secondary" onclick="go('g-koreksi',{id:'${u.ulangan_id}'})">${I('pen')}Koreksi ${d.stats.koreksi} esai</button>` : ''}<button class="btn btn-secondary" onclick="drop('res_${u.ulangan_id}');rerender()">${I('refresh')}</button><button class="btn btn-primary" onclick="exportHasil('${u.ulangan_id}')">${I('download')}Ekspor Excel (.xlsx)</button></div></div>
       <div class="flex g8 wrap mb16">${u.kelas_ids.length > 1 ? `<select class="select input-sm" style="width:180px" onchange="S.c.resF.kelas=this.value;rerender()"><option value="">Semua kelas (${d.rows.length})</option>${u.kelas_ids.map((k) => `<option value="${k}" ${F.kelas === k ? 'selected' : ''}>${esc(kelasShort(k))}</option>`).join('')}</select>` : ''}<span class="pill pill-neu pill-lg">KKTP / KKM: ${kkm}</span></div>
       <div class="grid gc4">${statCard('Rata-rata nilai CBT', fmtN(st.avg), '/ 100', st.avg >= kkm ? 'Melampaui KKM' : 'Di bawah KKM', 'star', st.avg >= kkm ? 'ok' : 'warn')}${statCard('Ketuntasan klasikal', st.n ? fmtN(st.tuntas / st.n * 100) + '%' : '-', '', `<b>${st.tuntas}</b> tuntas · <b>${st.n - st.tuntas}</b> perlu remedial`, 'check-c', 'p')}${statCard('Sebaran nilai', fmtN(st.max), '', 'Terendah ' + fmtN(st.min) + (top ? ' · Tertinggi: ' + esc(firstName(top.nama)) : ''), 'trending', '')}${statCard('Perlu koreksi', d.stats.koreksi, 'esai', d.stats.koreksi ? 'Nilai akhir belum final' : 'Semua nilai final', 'pen', d.stats.koreksi ? 'warn' : 'ok')}</div>
-      <div class="split mt16"><div class="card card-p"><div class="flex items-c jc-b"><h3>Distribusi Frekuensi Rentang Nilai</h3><span class="small muted">${st.n} siswa</span></div><div class="mt16">${CH.bars(bins, { h: 230, label: 'Distribusi nilai' })}</div><div class="legend-row mt8"><span><i style="background:#DC2626"></i>Remedial (&lt; ${kkm})</span><span><i style="background:#16A34A"></i>Tuntas (≥ ${kkm})</span></div></div>
-        <div class="card card-p"><h3>${I('sparkles', 'ink-p')} Kesimpulan Otomatis</h3><ul class="small tx2" style="padding-left:18px;line-height:1.8;margin:12px 0 0">${hasilInsight(d, rows, st, kkm).map((x) => `<li>${x}</li>`).join('')}</ul></div></div>
+      <div class="split mt16"><div class="card card-p"><div class="flex items-c jc-b"><h3>Distribusi Frekuensi Rentang Nilai</h3><span class="small muted">${st.n} siswa</span></div><div class="mt16">${CH.bars(bins, { h: 230, label: 'Distribusi nilai' })}</div><div class="legend-row mt8"><span><i style="background:#DC2626"></i>Remedial (&lt; ${kList.length > 1 ? 'KKM kelas' : fmtN(kkm)})</span><span><i style="background:#16A34A"></i>Tuntas (≥ ${kkm})</span></div></div>
+        <div class="card card-p"><h3>${I('sparkles', 'ink-p')} Kesimpulan Otomatis</h3><ul class="small tx2" style="padding-left:18px;line-height:1.8;margin:12px 0 0">${hasilInsight(d, rows, st, kkmLbl, kOf).map((x) => `<li>${x}</li>`).join('')}</ul></div></div>
       <div class="tabs mt24">${[['rekap', 'Rekap Nilai Siswa (' + rows.length + ')'], ['butir', 'Analisis Butir Soal (' + d.analysis.length + ')']].map((t) => `<button class="tab ${F.tab === t[0] ? 'on' : ''}" onclick="S.c.resF.tab='${t[0]}';rerender()">${t[1]}</button>`).join('')}</div>
       <div class="card mt16">${F.tab === 'butir' ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>No</th><th>Tipe</th><th>Butir soal</th><th>Tingkat kesukaran</th><th>Distribusi jawaban (PG)</th><th>Rekomendasi</th></tr></thead><tbody>${d.analysis.map((a) => { const df = diff(a.pct), dist = Object.keys(a.dist).sort().map((k) => `<span class="${String(a.kunci) === k ? 'ink-ok bold' : ''}">${k}:${a.dist[k]}</span>`).join(' · ');
           return `<tr><td class="mono">${pad(a.no)}</td><td>${pill(TIPE_SOAL[a.tipe].replace('PG Kompleks ', ''), a.tipe === 'ESAI' ? 'vio' : 'info')}</td><td class="small" style="max-width:360px">${esc(a.teks)}</td><td style="min-width:160px">${a.tipe === 'ESAI' ? '<span class="xs muted">Dinilai manual</span>' : `<div class="flex items-c g8"><div class="meter f1 ${df[1] === 'err' ? 'err' : df[1] === 'ok' ? 'ok' : ''}"><i style="width:${a.pct}%"></i></div><span class="mono small">${fmtN(a.pct)}%</span></div><div class="xs mt4">${pill(df[0], df[1])}</div>`}</td><td class="mono xs">${dist || '—'}</td><td class="small">${a.tipe === 'ESAI' ? '—' : a.pct < 30 ? `<span class="ink-err">${I('alert', 'ic-sm')} Revisi redaksi / remedial materi</span>` : a.pct > 90 ? '<span class="tx2">Pertimbangkan dinaikkan tingkatnya</span>' : `<span class="ink-ok">${I('check-c', 'ic-sm')} Pertahankan</span>`}</td></tr>`; }).join('')}</tbody></table></div>`
@@ -1058,18 +1062,18 @@ route('g-hasil', {
           { h: 'Skor PG', k: 'so', n: true, r: (r) => `<span class="mono">${fmtN(r.so)}</span>` },
           { h: 'Skor esai', k: 'se', n: true, r: (r) => r.sn === 'MENUNGGU_KOREKSI' ? pill('Menunggu', 'vio') : `<span class="mono">${fmtN(r.se)}</span>` },
           { h: 'Nilai akhir', k: 'na', n: true, r: (r) => `<b class="mono" style="font-size:15px">${fmtN(r.na)}</b>` },
-          { h: 'Status KKTP', k: 'na', v: (r) => r.na >= kkm ? 1 : 0, r: (r) => r.na >= kkm ? pill('Tuntas', 'ok', 'check') : pill('Perlu remedial', 'err', 'alert') }
+          { h: 'Status KKTP', k: 'na', v: (r) => r.na >= kOf(r) ? 1 : 0, r: (r) => `${r.na >= kOf(r) ? pill('Tuntas', 'ok', 'check') : pill('Perlu remedial', 'err', 'alert')}${kList.length > 1 ? `<div class="xs muted mt4">KKM ${fmtN(kOf(r))}</div>` : ''}` }
         ], { ph: 'Cari nama atau NIS…', emptyT: 'Belum ada peserta yang selesai' })}</div></div>`;
   }
 });
-function hasilInsight(d, rows, st, kkm) {
+function hasilInsight(d, rows, st, kkmLbl, kOf) {
   const out = [];
   if (!rows.length) return ['Belum ada peserta yang menyelesaikan ulangan ini.'];
-  out.push(`${fmtN(st.tuntas / st.n * 100)}% siswa mencapai KKM ${kkm} (${st.tuntas} dari ${st.n}).`);
+  out.push(`${fmtN(st.tuntas / st.n * 100)}% siswa mencapai ${kkmLbl} (${st.tuntas} dari ${st.n}).`);
   const hard = d.analysis.filter((a) => a.tipe !== 'ESAI' && a.pct < 30), easy = d.analysis.filter((a) => a.tipe !== 'ESAI' && a.pct > 90);
   if (hard.length) out.push(`${hard.length} butir tergolong <b>sukar</b> (nomor ${hard.map((a) => a.no).join(', ')}): materi terkait perlu penguatan atau redaksi soal ditinjau ulang.`);
   if (easy.length) out.push(`${easy.length} butir dijawab benar oleh &gt;90% siswa.`);
-  const remed = rows.filter((r) => r.na < kkm).length; if (remed) out.push(`${remed} siswa perlu dijadwalkan remedial.`);
+  const remed = rows.filter((r) => r.na < kOf(r)).length; if (remed) out.push(`${remed} siswa perlu dijadwalkan remedial.`);
   if (d.stats.koreksi) out.push(`${d.stats.koreksi} jawaban esai belum dikoreksi; nilai akhir siswa tersebut belum final.`);
   const viol = rows.filter((r) => r.v > 0).length; if (viol) out.push(`${viol} peserta tercatat melakukan pelanggaran selama ujian.`);
   return out;
@@ -1077,7 +1081,7 @@ function hasilInsight(d, rows, st, kkm) {
 function exportHasil(ul) {
   const d = S.c['res_' + ul].d, u = d.ulangan;
   exportXlsx('hasil_' + u.judul.replace(/[^\w]+/g, '_').slice(0, 40), [
-    { name: 'Rekap Nilai', rows: [['Rank', 'NIS', 'Nama', 'Kelas', 'Skor PG', 'Skor Esai', 'Nilai Akhir', 'Status', 'Durasi (menit)', 'Pelanggaran']].concat(d.rows.map((r, i) => [i + 1, r.nis_nip, r.nama, kelasNm(r.kelas_id), r.so, r.se, r.na, r.na >= d.kkm ? 'Tuntas' : 'Remedial', r.durasi, r.v])) },
+    { name: 'Rekap Nilai', rows: [['Rank', 'NIS', 'Nama', 'Kelas', 'Skor PG', 'Skor Esai', 'Nilai Akhir', 'KKM', 'Status', 'Durasi (menit)', 'Pelanggaran']].concat(d.rows.map((r, i) => { const kk = r.kkm !== undefined && r.kkm !== null ? r.kkm : d.kkm; return [i + 1, r.nis_nip, r.nama, kelasNm(r.kelas_id), r.so, r.se, r.na, kk, r.na >= kk ? 'Tuntas' : 'Remedial', r.durasi, r.v]; })) },
     { name: 'Analisis Butir', rows: [['No', 'Tipe', 'Soal', '% Benar', 'Jumlah Menjawab']].concat(d.analysis.map((a) => [a.no, a.tipe, a.teks, a.pct, a.jawab])) }]);
 }
 (window.__SP_F__ = window.__SP_F__ || {}).guru = 1;
