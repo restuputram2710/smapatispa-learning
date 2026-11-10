@@ -406,7 +406,7 @@ function exQHTML(q) {
   const n = X.qs.length;
   return `<div class="q-card"><div class="flex items-c g12 wrap jc-b"><span class="q-no">SOAL ${q.no} DARI ${n}</span><span class="small tx2">${TIPE_SOAL[q.tipe]}</span><span class="pill pill-info">Bobot: ${fmtN(q.bobot)} poin</span></div>
         <div class="divider"></div><div class="q-text">${esc(q.teks)}</div>
-        ${q.img ? `<img class="q-img" src="${esc(q.img)}" alt="Gambar soal" decoding="async" onclick="previewPublic('Gambar soal ${q.no}','','IMG');setTimeout(()=>{const im=$('.sheet-bd img');if(im)im.src='${esc(q.img)}'},30)">` : ''}
+        ${q.img ? `<img class="q-img" src="${esc(IMG_VIA_APP && q.gid && !IMGD[q.gid] ? '' : soalImgSrc(q.img, q.gid))}" data-fid="${esc(q.gid || '')}" alt="Gambar soal" decoding="async" onerror="imgFb(this)" onclick="if(!this.classList.contains('img-err')){const s=this.src;previewPublic('Gambar soal ${q.no}','','IMG');setTimeout(()=>{const im=$('.sheet-bd img');if(im)im.src=s},30)}">` : ''}
         ${q.tipe === 'MCMA' ? `<div class="banner banner-info mt16" style="padding:10px 12px">${I('checkbox', 'ic-sm')}<span>Pilih lebih dari satu jawaban${q.n ? ` (${q.n} jawaban benar)` : ''}.</span></div>` : ''}
       </div>
       ${answerArea(q)}
@@ -494,7 +494,17 @@ function exGo(i, dir) {
 }
 function exNav(d) { exGo(X.idx + d, d); }
 /** Muat lebih dulu gambar soal sebelum & sesudahnya → pindah soal tanpa jeda. */
-function exPreload() { X.pre = X.pre || {}; [X.idx + 1, X.idx - 1, X.idx + 2].forEach((i) => { const q = X.qs[i]; if (q && q.img && !X.pre[q.img]) { const im = new Image(); im.decoding = 'async'; im.src = q.img; X.pre[q.img] = im; } }); }
+function exPreload() {
+  X.pre = X.pre || {};
+  [X.idx + 1, X.idx - 1, X.idx + 2].forEach((i) => {
+    const q = X.qs[i]; if (!q || !q.img || X.pre[q.img]) return;
+    // tautan Drive sudah terbukti gagal di perangkat ini → langsung ambil lewat server aplikasi
+    if (IMG_VIA_APP && q.gid) { X.pre[q.img] = 1; soalImg(q.gid).catch(() => { delete X.pre[q.img]; }); return; }
+    const im = new Image(); im.decoding = 'async';
+    im.onerror = () => { if (q.gid) { IMG_VIA_APP = true; soalImg(q.gid).catch(() => {}); } };
+    im.src = q.img; X.pre[q.img] = im;
+  });
+}
 function setAns(qid, v) { X.a[qid] = v; X.dirty = true; queueSave(); }
 function ansPG(qid, k) { setAns(qid, X.a[qid] === k ? '' : k); paintAns(); }
 function ansMC(qid, k) { const s = Array.isArray(X.a[qid]) ? X.a[qid].slice() : []; const i = s.indexOf(k); if (i >= 0) s.splice(i, 1); else s.push(k); setAns(qid, s.sort()); paintAns(); }

@@ -507,6 +507,28 @@ const fileIcon = (name, mime) => /pdf/i.test(mime || name) ? 'file-text' : /imag
 const fmtSize = (b) => b > 1048576 ? fmtN(b / 1048576) + ' MB' : fmtN(b / 1024, 0) + ' KB';
 const drivePreview = (id) => `https://drive.google.com/file/d/${id}/preview`;
 const driveImg = (id, w) => /^https?:/.test(id || '') ? id : `https://drive.google.com/thumbnail?id=${id}&sz=w${w || 1200}`;
+/** ID berkas Drive dari tautan gambar (thumbnail / uc / file/d/…) atau ID polos. */
+const driveIdOf = (u) => { const m = String(u || '').match(/[?&]id=([-\w]{20,})|\/d\/([-\w]{20,})|^([-\w]{20,})$/); return m ? m[1] || m[2] || m[3] : ''; };
+/**
+ * Gambar soal: bila tautan Google Drive gagal dibuka di perangkat ini (berkas tidak publik, akun Google lain,
+ * pemblokiran cookie), gambar diambil lewat server aplikasi lalu disimpan di memori (IMGD) untuk tampilan berikutnya.
+ */
+const IMGD = {}, IMGP = {};
+let IMG_VIA_APP = false;
+function soalImg(id) {
+  if (IMGD[id]) return Promise.resolve(IMGD[id]);
+  if (!IMGP[id]) IMGP[id] = call('soal.img', { id }, { silent: true, retries: 2 }).then((r) => (IMGD[id] = 'data:' + r.mime + ';base64,' + r.data)).catch((e) => { delete IMGP[id]; throw e; });
+  return IMGP[id];
+}
+const soalImgSrc = (url, id) => IMGD[id || driveIdOf(url)] || url;
+function imgFb(el) {
+  if (!el || el.dataset.fb) return;
+  const id = el.dataset.fid || driveIdOf(el.getAttribute('src'));
+  if (!id) return;
+  el.dataset.fb = '1'; IMG_VIA_APP = true; el.classList.add('img-ld');
+  soalImg(id).then((src) => { el.src = src; el.classList.remove('img-ld'); })
+    .catch(() => { el.classList.remove('img-ld'); el.classList.add('img-err'); el.alt = 'Gambar soal tidak dapat dimuat. Periksa koneksi lalu buka ulang soal ini.'; });
+}
 const driveDl = (id) => `https://drive.google.com/uc?export=download&id=${id}`;
 function ytId(u) { const m = String(u || '').match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/); return m ? m[1] : ''; }
 /** Pratinjau berkas publik (Drive) atau privat (base64 dari server) di dalam modal — bukan tab baru. */

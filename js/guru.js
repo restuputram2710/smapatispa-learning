@@ -408,8 +408,18 @@ const bkInfo = (b) => ({ berkas_id: b.berkas_id, nama_berkas: b.nama, kelas_ids:
 /** Kelas yang boleh dipilih untuk berkas: guru → kelas yang diajar pada mapel itu; admin → semua kelas. */
 function bkKelasOpts(mapel) {
   if (hasRole('ADMIN')) return (B().kelas || []).map((k) => k.kelas_id);
-  const ks = uniqBy(G().penugasan.filter((x) => !mapel || x.mapel_id === mapel), (x) => x.kelas_id).map((x) => x.kelas_id);
-  return ks.length ? ks : uniqBy(G().penugasan, (x) => x.kelas_id).map((x) => x.kelas_id);
+  let ks = uniqBy(G().penugasan.filter((x) => !mapel || x.mapel_id === mapel), (x) => x.kelas_id).map((x) => x.kelas_id);
+  if (!ks.length) ks = uniqBy(G().penugasan, (x) => x.kelas_id).map((x) => x.kelas_id);
+  return ks.concat((B().kelas || []).filter((k) => k.bebas && ks.indexOf(k.kelas_id) < 0).map((k) => k.kelas_id));
+}
+/** Kelas tanpa jadwal mengajar (mis. kelas simulasi/uji coba): boleh dipilih guru mana pun untuk ujian. */
+const kelasBebas = (k) => !!kelasBy(k).bebas;
+const ujKelasOK = (mapel, k) => hasRole('ADMIN') || kelasBebas(k) || G().penugasan.some((x) => x.mapel_id === mapel && x.kelas_id === k);
+/** Pilihan kelas ujian: kelas yang mengajar mapel ini dulu, lalu kelas lain yang boleh dipilih (admin: semua kelas). */
+function ujKelasOpts(mapel) {
+  const pen = uniqBy(G().penugasan.filter((x) => x.mapel_id === mapel), (x) => x.kelas_id).map((x) => x.kelas_id);
+  const lain = (B().kelas || []).map((k) => k.kelas_id).filter((k) => pen.indexOf(k) < 0 && (hasRole('ADMIN') || kelasBebas(k)));
+  return { pen, lain };
 }
 function bkMapelOpts() { const ms = uniqBy(G().penugasan, (x) => x.mapel_id).map((x) => x.mapel_id); if (hasRole('ADMIN')) (B().mapel || []).forEach((m) => { if (ms.indexOf(m.mapel_id) < 0) ms.push(m.mapel_id); }); return ms; }
 /** Beri label berkas pada soal lama (berkas otomatis) agar bisa ditambah soal / diimpor. */
@@ -514,7 +524,7 @@ function openSoalEditor(id, base, bk) {
         $('#pernBox', el).oninput = sync; $('#pernBox', el).onchange = sync;
       } else $('#sBody', el).innerHTML = `<div class="field"><label class="label">Rubrik penilaian</label><textarea class="textarea" name="rubrik" placeholder="Kriteria skor penuh, sebagian, dan nol…">${esc((op && op.rubrik) || '')}</textarea></div><div class="field"><label class="label">Acuan jawaban</label><textarea class="textarea" name="acuan" placeholder="Contoh jawaban ideal untuk korektor…">${esc((ku && ku.acuan) || '')}</textarea></div>`;
     };
-    const drawImg = () => { $('#sImg', el).innerHTML = E.gambar ? `<div class="file-chip"><img src="${esc(driveImg(E.gambar, 400))}" style="width:64px;height:48px;object-fit:cover;border-radius:8px" alt=""><div class="f1 small bold">Gambar terpasang</div><button type="button" class="icon-btn" id="imgDel">${I('x')}</button></div>` : `<label class="upload" style="padding:14px">${I('image')}<span class="bold small"> Unggah gambar</span><input type="file" hidden accept="image/*" id="imgIn"></label>`;
+    const drawImg = () => { $('#sImg', el).innerHTML = E.gambar ? `<div class="file-chip"><img src="${esc(soalImgSrc(driveImg(E.gambar, 400), E.gambar))}" data-fid="${esc(/^https?:/.test(E.gambar) ? '' : E.gambar)}" onerror="imgFb(this)" style="width:64px;height:48px;object-fit:cover;border-radius:8px" alt=""><div class="f1 small bold">Gambar terpasang</div><button type="button" class="icon-btn" id="imgDel">${I('x')}</button></div>` : `<label class="upload" style="padding:14px">${I('image')}<span class="bold small"> Unggah gambar</span><input type="file" hidden accept="image/*" id="imgIn"></label>`;
       const del = $('#imgDel', el); if (del) del.onclick = () => { E.gambar = ''; drawImg(); };
       const inp = $('#imgIn', el); if (inp) inp.onchange = () => { const file = inp.files[0]; if (!file) return; $('#sImg', el).innerHTML = `<div class="file-chip"><div class="tile">${I('image')}</div><div class="f1"><div class="small bold">Mengunggah…</div><div class="prog"><i></i></div></div></div>`; uploadFile(file, 'soal').then((r) => { E.gambar = r.file_id; drawImg(); }).catch((e) => { failToast(e); drawImg(); }); };
     };
@@ -588,7 +598,7 @@ route('g-import', {
           <a class="btn btn-secondary btn-block mt12" href="templates/template-soal-cbt.docx" download onclick="S.c.imp.step=Math.max(S.c.imp.step,2);setTimeout(rerender,50)">${I('file-text')}Template Word (.docx)</a>
           <p class="small tx2 mt16"><b>Excel</b>: satu baris = satu soal. Kolom: <span class="mono xs">${IMPORT_COLS.join(', ')}</span>. Gambar ditempel di kolom <b>gambar</b> pada baris soalnya.</p>
           <a class="btn btn-secondary btn-block mt12" href="templates/template-soal-cbt.xlsx" download onclick="S.c.imp.step=Math.max(S.c.imp.step,2);setTimeout(rerender,50)">${I('table')}Template Excel (.xlsx)</a>
-          <ul class="small tx2" style="padding-left:18px;margin:14px 0 0;line-height:1.8"><li><b>Tipe</b>: PG, MCMA (PG kompleks), KATEGORI (benar–salah), ESAI</li><li>Kunci MCMA: <span class="mono">A, C</span> · benar–salah: <span class="mono">Benar, Salah</span></li><li>Gambar otomatis diperkecil & disimpan di Drive sekolah</li><li>Format gambar: PNG atau JPG, satu gambar per soal</li></ul></div>
+          <ul class="small tx2" style="padding-left:18px;margin:14px 0 0;line-height:1.8"><li><b>Tipe</b>: PG, MCMA (PG kompleks), KATEGORI (benar–salah), ESAI</li><li>Kunci MCMA: <span class="mono">A, C</span> · benar–salah: <span class="mono">Benar, Salah</span></li><li>Gambar otomatis diperkecil & disimpan di Drive sekolah</li><li>Format gambar: PNG atau JPG, satu gambar per soal</li><li><b>Paragraf baru</b> di Excel: tekan <b>Alt+Enter</b> di dalam sel, atau tekan Enter lalu lanjutkan mengetik di sel bawahnya dengan kolom tipe & kunci dikosongkan — otomatis digabung jadi satu soal</li></ul></div>
         <div class="card card-p"><div class="flex items-c g8">${I('shield', 'ink-ok')}<b>Proteksi integritas</b></div><p class="small tx2 mt8">Soal bermasalah dilewati otomatis sehingga tidak masuk ke bank soal. Perbaiki di berkas lalu unggah ulang.</p></div></div></div>
       ${res && res.valid.length ? `<div class="sticky-bar"><span class="small muted f1">${res.valid.length} soal valid${nImg ? ' (' + nImg + ' bergambar)' : ''} akan disimpan ke berkas <b>${esc(tgt ? tgt.nama : BK.nama || '(isi nama berkas)')}</b> · ${esc(mapelNm(W.mapel))}.</span><button class="btn btn-ghost" onclick="S.c.imp=null;rerender()">Batal / Unggah Ulang</button><button class="btn btn-primary btn-lg" id="impSave" onclick="impSave()">${I('cloud-ok')}Simpan ${res.valid.length} Soal ke Bank Soal${I('arrow-r')}</button></div>` : ''}</div>`;
   }
@@ -619,7 +629,34 @@ function impExtra(files) {
   if (W.items) impSetItems({ items: W.items, warnings: W.warn }); else rerender();
 }
 function impSheet() { const url = $('#impUrl').value.trim(); if (!url) return; call('sheet.read', { url }).then((r) => { S.c.imp.file = 'Google Sheet'; impSetItems({ items: rowsToObjs(r.rows).map((o, i) => ({ row: impNormKeys(o), ref: 'Baris ' + (i + 2) })), warnings: [] }); }).catch(failToast); }
+/**
+ * Baris lanjutan: di Excel/Google Sheets tombol Enter memindahkan kursor ke sel di bawahnya. Baris tanpa tipe, kunci,
+ * skor & mode_skor dianggap lanjutan soal di atasnya → isinya digabung sebagai paragraf baru (kolom yang sama).
+ */
+function impMergeLanjutan(items) {
+  const isi = (v) => String(v == null ? '' : v).trim() !== '', IMG_COL = ['gambar', 'url_gambar', 'gambar_id'];
+  if (!items.some((it) => isi(it.row.tipe))) return { items, n: 0 };   // berkas tanpa kolom tipe: dibiarkan apa adanya
+  const out = []; let n = 0;
+  items.forEach((it) => {
+    const r = it.row, prev = out[out.length - 1];
+    if (prev && !isi(r.tipe) && !isi(r.kunci) && !isi(r.skor) && !isi(r.mode_skor)) {
+      Object.keys(r).forEach((k) => {
+        if (!isi(r[k])) return;
+        const v = String(r[k]).trim();
+        if (IMG_COL.indexOf(k) >= 0) { if (!prev.img && !isi(prev.row[k])) prev.row[k] = v; return; }
+        prev.row[k] = isi(prev.row[k]) ? String(prev.row[k]).replace(/\s+$/, '') + '\n' + v : v;
+      });
+      if (it.img && !prev.img) { prev.img = it.img; prev.imgName = it.imgName; prev.imgErr = it.imgErr; }
+      prev.ref = String(prev.ref || '') + '+' + String(it.ref || '').replace(/^Baris\s*/, '');
+      n++; return;
+    }
+    out.push(it);
+  });
+  return { items: out, n };
+}
 function impSetItems(parsed) {
+  const mg = impMergeLanjutan(parsed.items || []);
+  if (mg.n) parsed = Object.assign({}, parsed, { items: mg.items, warnings: (parsed.warnings || []).concat([mg.n + ' baris lanjutan (kolom tipe & kunci kosong) digabung ke soal di atasnya sebagai paragraf baru.']) });
   const W = S.c.imp, items = (parsed.items || []).slice(0, 500), ex = W.extra || {};
   if (!items.length) { W.items = null; W.res = null; W.warn = parsed.warnings || []; rerender(); toast((parsed.warnings || [])[0] || 'Tidak ada soal yang terbaca dari berkas.', 'warn'); return; }
   items.forEach((it) => {
@@ -768,7 +805,7 @@ route('g-ujian-form', {
     if (!U || U.key !== fk) {
       const u = det ? det.ulangan : null, c = cfg(), d0 = D.day0(now()) + 864e5, bk = !u && p.berkas ? bkFind(p.berkas) : null;
       const [bh, bm] = String(B().admin && B().admin.settings ? B().admin.settings.jam_buka_default : '07:00').split(':').map(Number);
-      const bkK = bk ? bk.kelas_ids.filter((k) => hasRole('ADMIN') || G().penugasan.some((x) => x.mapel_id === bk.mapel_id && x.kelas_id === k)) : [];
+      const bkK = bk ? bk.kelas_ids.filter((k) => ujKelasOK(bk.mapel_id, k)) : [];
       U = S.c.uForm = { key: fk, id: p.id, terkunci: det ? det.terkunci : false,
         judul: u ? u.judul : bk ? bk.nama : '', jenis: u ? u.jenis : bk && JENIS_UL[bk.jenis] ? bk.jenis : 'UH', mapel_id: u ? u.mapel_id : bk ? bk.mapel_id : (G().penugasan[0] || {}).mapel_id, kelas_ids: u ? u.kelas_ids : bkK,
         buka: u ? u.buka : d0 + (bh || 7) * 3600000 + (bm || 0) * 60000, tutup: u ? u.tutup : d0 + 12 * 3600000, durasi: u ? u.durasi_menit : 90,
@@ -778,7 +815,7 @@ route('g-ujian-form', {
       if (!U.mapel_id) U.mapel_id = (bkMapelOpts()[0]) || '';
     }
     const bankBy = {}; bank.forEach((s) => { bankBy[s.soal_id] = s; });
-    const pens = G().penugasan.filter((x) => x.mapel_id === U.mapel_id), kelasOpts = hasRole('ADMIN') && !pens.length ? (B().kelas || []).map((k) => ({ kelas_id: k.kelas_id })) : uniqBy(pens, (x) => x.kelas_id);
+    const KO = ujKelasOpts(U.mapel_id), kChip = (k) => `<button type="button" class="chip ${U.kelas_ids.indexOf(k) >= 0 ? 'sel-o' : ''}" onclick="uToggleKelas('${k}')">${U.kelas_ids.indexOf(k) >= 0 ? I('check', 'ic-sm') : ''}${esc(kelasShort(k))}${kelasBebas(k) && !hasRole('ADMIN') ? ' <span class="xs muted">(tanpa jadwal)</span>' : ''}</button>`;
     const mapels = uniqBy(G().penugasan, (x) => x.mapel_id); bkMapelOpts().concat([U.mapel_id]).forEach((m) => { if (m && !mapels.some((x) => x.mapel_id === m)) mapels.push({ mapel_id: m }); });
     const sel = U.soal.filter((s) => bankBy[s.soal_id]);
     const comp = { PG: [0, 0], MCMA: [0, 0], KATEGORI: [0, 0], ESAI: [0, 0] }; sel.forEach((s) => { const t = bankBy[s.soal_id].tipe; comp[t][0]++; comp[t][1] += num(s.bobot); });
@@ -791,7 +828,7 @@ route('g-ujian-form', {
         ${sect(1, 'Identitas & Target Peserta', `<div class="col g16"><div class="field"><label class="label">Judul ujian <span class="req">*</span></label><input class="input" data-u="judul" value="${esc(U.judul)}" placeholder="Contoh: Penilaian Akhir Semester Fisika"></div>
           <div class="field"><label class="label">Jenis asesmen</label><div class="seg wrap" data-useg="jenis">${[['UH', 'UH / Harian'], ['UTS', 'PTS / Tengah Semester'], ['UAS', 'PAS / Akhir Semester'], ['LATIHAN', 'Latihan']].map((x) => `<button type="button" data-v="${x[0]}" class="${U.jenis === x[0] ? 'on' : ''}">${x[1]}</button>`).join('')}</div></div>
           <div class="form-grid c2"><div class="field"><label class="label">Mata pelajaran</label><select class="select" data-u="mapel_id" ${U.terkunci ? 'disabled' : ''}>${mapels.map((m) => `<option value="${m.mapel_id}" ${U.mapel_id === m.mapel_id ? 'selected' : ''}>${esc(mapelNm(m.mapel_id))}</option>`).join('')}</select></div>
-          <div class="field"><label class="label">Kelas target <span class="req">*</span></label><div class="chips">${kelasOpts.map((k) => `<button type="button" class="chip ${U.kelas_ids.indexOf(k.kelas_id) >= 0 ? 'sel-o' : ''}" onclick="uToggleKelas('${k.kelas_id}')">${U.kelas_ids.indexOf(k.kelas_id) >= 0 ? I('check', 'ic-sm') : ''}${esc(kelasShort(k.kelas_id))}</button>`).join('') || '<span class="small muted">Tidak ada kelas untuk mapel ini.</span>'}</div></div></div></div>`)}
+          <div class="field"><label class="label">Kelas target <span class="req">*</span></label><div class="chips">${KO.pen.map(kChip).join('') || (KO.lain.length ? '' : '<span class="small muted">Tidak ada kelas untuk mapel ini.</span>')}</div>${KO.lain.length ? `${KO.pen.length ? `<div class="xs muted mt8">${hasRole('ADMIN') ? 'Kelas lain' : 'Kelas tanpa jadwal mengajar (mis. kelas simulasi)'}</div>` : ''}<div class="chips mt4">${KO.lain.map(kChip).join('')}</div>` : ''}</div></div></div>`)}
         ${sect(2, 'Jadwal & Durasi Pengerjaan', `<div class="form-grid c3"><div class="field"><label class="label">Waktu buka</label><input class="input" type="datetime-local" data-u="buka" value="${D.local(U.buka)}"><div class="help">Siswa bisa mulai sejak waktu ini</div></div>
           <div class="field"><label class="label">Waktu tutup</label><input class="input" type="datetime-local" data-u="tutup" value="${D.local(U.tutup)}"><div class="help">Batas akhir sesi susulan</div></div>
           <div class="field"><label class="label">Durasi (menit)</label><input class="input" type="number" min="5" max="600" data-u="durasi" value="${U.durasi}"><div class="help">Timer individu sejak klik Mulai</div></div></div>`, `<span class="ml-a xs muted">${I('clock', 'ic-sm')} Zona waktu perangkat ${TZL}</span>`)}
@@ -852,7 +889,7 @@ function openBerkasPicker() {
   mount: (el, close) => { $$('.bk-pick', el).forEach((x) => { x.onclick = () => { const b = all.find((y) => y.key === x.dataset.k); if (!b) return; let n = 0;
     b.soal.forEach((s) => { if (!have[s.soal_id]) { U.soal.push({ soal_id: s.soal_id, bobot: s.skor_maks }); n++; } });
     if (!U.judul.trim()) U.judul = b.nama;
-    if (b.mapel_id !== U.mapel_id && !U.soal.some((s) => !b.soal.some((y) => y.soal_id === s.soal_id))) { U.mapel_id = b.mapel_id; U.kelas_ids = b.kelas_ids.filter((k) => hasRole('ADMIN') || G().penugasan.some((x) => x.mapel_id === b.mapel_id && x.kelas_id === k)); }
+    if (b.mapel_id !== U.mapel_id && !U.soal.some((s) => !b.soal.some((y) => y.soal_id === s.soal_id))) { U.mapel_id = b.mapel_id; U.kelas_ids = b.kelas_ids.filter((k) => ujKelasOK(b.mapel_id, k)); }
     close(); toast(n + ' soal dari "' + b.nama + '" dimasukkan.', 'ok'); rerender(); }; }); } });
 }
 function saveUjian(status) {
@@ -958,7 +995,7 @@ route('g-koreksi', {
       <div class="card mt16 flex g12 items-c wrap" style="padding:12px 16px">${d.ulangan.kelas_ids.length > 1 ? `<select class="select input-sm" style="width:160px" onchange="S.c.esF.kelas=this.value;rerender()"><option value="">Semua kelas</option>${d.ulangan.kelas_ids.map((k) => `<option value="${k}" ${F.kelas === k ? 'selected' : ''}>${esc(kelasShort(k))}</option>`).join('')}</select>` : ''}
         <div class="seg">${[['semua', 'Semua', list.length], ['perlu', 'Perlu koreksi', perlu.length], ['sudah', 'Sudah dinilai', sudah.length]].map((x) => `<button class="${F.st === x[0] ? 'on' : ''}" onclick="S.c.esF.st='${x[0]}';rerender()">${x[1]} (${x[2]})</button>`).join('')}</div>
         <label class="check ml-a small"><input type="checkbox" ${hide ? 'checked' : ''} onchange="S.c.esHide=this.checked;rerender()">Sembunyikan nama siswa</label></div>
-      <div class="split s-eq mt16"><div class="col g16"><div class="card card-p"><div class="flex items-c jc-b"><h3>${I('file-text', 'ink-p')} Stimulus & Butir Soal</h3><span class="pill pill-info mono">BOBOT ${fmtN(q.bobot)}</span></div><p class="pre mt12">${esc(q.teks)}</p>${q.gambar ? `<img src="${esc(q.gambar)}" class="q-img" alt="">` : ''}</div>
+      <div class="split s-eq mt16"><div class="col g16"><div class="card card-p"><div class="flex items-c jc-b"><h3>${I('file-text', 'ink-p')} Stimulus & Butir Soal</h3><span class="pill pill-info mono">BOBOT ${fmtN(q.bobot)}</span></div><p class="pre mt12">${esc(q.teks)}</p>${q.gambar ? `<img src="${esc(soalImgSrc(q.gambar))}" class="q-img" alt="Gambar soal" onerror="imgFb(this)">` : ''}</div>
           ${q.acuan ? `<div class="card card-p"><h3>${I('key', 'ink-ok')} Kunci & Acuan Jawaban</h3><div class="code-box mt12 pre" style="font-family:var(--f-body)">${esc(q.acuan)}</div></div>` : ''}
           ${q.rubrik ? `<div class="card card-p"><h3>${I('list', 'ink-p')} Rubrik Penilaian (maks ${fmtN(q.bobot)})</h3><div class="banner banner-ok mt12 pre" style="display:block">${esc(q.rubrik)}</div></div>` : ''}</div>
         <div class="col g16">${j ? `<div class="card card-p flex items-c g12 wrap">${hide ? `<div class="av">${pos + 1}</div>` : avatar(j.nama, '', '')}<div class="f1" style="min-width:0"><div class="xs ink-p bold">Siswa ke-${pos + 1} dari ${shown.length}</div><h3>${hide ? 'Peserta #' + (pos + 1) : esc(j.nama)}</h3><div class="mono xs muted">${hide ? '' : 'NIS: ' + esc(j.nis_nip) + ' · '}${esc(kelasShort(j.kelas_id))} · Skor PG otomatis: ${fmtN(j.so)}</div></div>
