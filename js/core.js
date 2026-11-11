@@ -513,6 +513,56 @@ const driveIdOf = (u) => { const m = String(u || '').match(/[?&]id=([-\w]{20,})|
  * Gambar soal: bila tautan Google Drive gagal dibuka di perangkat ini (berkas tidak publik, akun Google lain,
  * pemblokiran cookie), gambar diambil lewat server aplikasi lalu disimpan di memori (IMGD) untuk tampilan berikutnya.
  */
+// ── Rumus di teks soal: pangkat (superskrip) & indeks (subskrip) ──
+// Penulisan: x^2 · 10^-3 · Fe^3+ · Na^+ · e^x · x^{n+1} → pangkat;  H_2O · CO_2 · v_0 · v_t · x_{maks} → indeks.
+// Bentuk ^(…) / _(…) dari impor Word versi lama juga dikenali. Aman: teks di-escape dulu, hanya <sup>/<sub> yang ditambahkan.
+const RM_SUP = /\^(?:\{([^{}\n]{1,60})\}|\(([^()\n]{1,60})\)|([+\-−]?\d+(?:[.,]\d+)?(?:[+\-−](?![0-9A-Za-z(]))?|[+\-−](?![0-9A-Za-z(])|[A-Za-z](?![A-Za-z])))/g;
+const RM_SUB_B = /_(?:\{([^{}\n]{1,60})\})/g;
+const RM_SUB = /([A-Za-z0-9)\]>])_(?:\(([^()\n]{1,60})\)|(\d+|[A-Za-z](?![A-Za-z])))/g;
+const rmHas = (s) => /[\^_]/.test(s || '');
+function rumus(s) {
+  const h = esc(s);
+  if (!rmHas(h)) return h;
+  return h.replace(RM_SUP, (m, a, b, c) => '<sup>' + (a || b || c) + '</sup>')
+    .replace(RM_SUB_B, (m, a) => '<sub>' + a + '</sub>')
+    .replace(RM_SUB, (m, p, a, b) => p + '<sub>' + (a || b) + '</sub>');
+}
+const RM_SUPC = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
+const RM_SUBC = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎', a: 'ₐ', e: 'ₑ', o: 'ₒ', x: 'ₓ', h: 'ₕ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', p: 'ₚ', s: 'ₛ', t: 'ₜ' };
+/** Versi teks biasa (judul, ringkasan, ekspor): pakai karakter Unicode bila ada (H₂O, m/s²). */
+function rumusTeks(s) {
+  s = String(s == null ? '' : s);
+  if (!rmHas(s)) return s;
+  const map = (t, m, k) => t.split('').every((c) => m[c]) ? t.split('').map((c) => m[c]).join('') : k + '(' + t + ')';
+  return s.replace(RM_SUP, (x, a, b, c) => map(a || b || c, RM_SUPC, '^'))
+    .replace(RM_SUB_B, (x, a) => map(a, RM_SUBC, '_'))
+    .replace(RM_SUB, (x, p, a, b) => p + map(a || b, RM_SUBC, '_'));
+}
+/** Bungkus pilihan teks di kolom isian dengan penanda pangkat (^) / indeks (_). */
+function rmWrap(el, kind) {
+  if (!el || el.disabled) return;
+  const a = el.selectionStart, b = el.selectionEnd, sel = el.value.slice(a, b);
+  const ins = kind + (/^\d+$/.test(sel) && !/[.,]\d/.test(el.value.slice(b, b + 2)) ? sel : '{' + sel + '}');   // angka: x^2, H_2O; selain itu: x^{n+1}
+  el.focus(); el.setRangeText(ins, a, b, 'end');
+  if (!sel) { const p = a + 2; el.setSelectionRange(p, p); }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function rmIns(el, ch) { if (!el || el.disabled) return; el.focus(); el.setRangeText(ch, el.selectionStart, el.selectionEnd, 'end'); el.dispatchEvent(new Event('input', { bubbles: true })); }
+const RM_SYM = ['°', '×', '÷', '±', '√', 'π', 'Δ', 'α', 'β', 'θ', 'λ', 'μ', 'Ω', '→', '⇌', '≈', '≠', '≤', '≥', '∞', '½'];
+/** Bilah alat rumus untuk form soal (tombol tidak mengambil fokus kolom). */
+const rmBar = (id) => `<div class="rm-bar" id="${id}" role="toolbar" aria-label="Alat rumus"><button type="button" class="rm-b" data-rm="^" title="Pangkat / superskrip (mis. x², 10⁻³, Fe³⁺)">x<sup>2</sup></button><button type="button" class="rm-b" data-rm="_" title="Indeks / subskrip (mis. H₂O, v₀)">x<sub>2</sub></button><span class="rm-sep"></span>${RM_SYM.map((c) => `<button type="button" class="rm-b rm-s" data-sym="${c}" title="Sisipkan ${c}">${c}</button>`).join('')}</div>`;
+function rmMount(form, bar, onChange) {
+  let last = null;
+  form.addEventListener('focusin', (e) => { const t = e.target; if (t.matches('textarea, input[type="text"], input:not([type])')) last = t; });
+  bar.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  bar.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const el = last && document.body.contains(last) ? last : form.querySelector('textarea');
+    if (b.dataset.rm) rmWrap(el, b.dataset.rm); else rmIns(el, b.dataset.sym);
+    if (onChange) onChange();
+  });
+}
 /** KKM/KKTP: milik kelas (diatur Admin) → KKM bawaan di Pengaturan. target = kelas sasaran (mis. eskul) bila punya KKM sendiri. */
 const kkmOwn = (kid) => { const k = kid ? (B().kelas || []).find((x) => x.kelas_id === kid) : null, v = k && k.kkm !== '' && k.kkm !== null && k.kkm !== undefined ? Number(k.kkm) : NaN; return isFinite(v) ? v : null; };
 const kkmDef = () => num(cfg().kkm, 75);

@@ -747,11 +747,25 @@ async function zipImage(zip, path) {
 }
 const SUPC = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
 const SUBC = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎' };
-/** Pangkat/indeks Word → karakter Unicode (m/s², H₂O); bila tak terpetakan → ^(…) / _(…). */
+/** Pangkat/indeks Word/Excel → karakter Unicode (m/s², H₂O); bila tak terpetakan → ^{…} / _{…} (ditampilkan sebagai pangkat/indeks). */
 function supSub(t, va) {
   if (!t || (va !== 'superscript' && va !== 'subscript')) return t || '';
   const m = va === 'superscript' ? SUPC : SUBC, chars = t.split('');
-  return chars.every((c) => m[c]) ? chars.map((c) => m[c]).join('') : (va === 'superscript' ? '^' : '_') + (t.length > 1 ? '(' + t + ')' : t);
+  return chars.every((c) => m[c]) ? chars.map((c) => m[c]).join('') : (va === 'superscript' ? '^' : '_') + '{' + t + '}';
+}
+/** Gabungkan potongan teks berurutan yang formatnya sama (Word/Excel sering memecah "2+" menjadi beberapa run). */
+function runBuf() {
+  let out = '', buf = '', va = '';
+  const flush = () => { if (buf) out += supSub(buf, va); buf = ''; };
+  return { add: (t, v) => { v = v === 'superscript' || v === 'subscript' ? v : ''; if (v !== va) { flush(); va = v; } buf += t; }, raw: (t) => { flush(); va = ''; out += t; }, done: () => { flush(); return out; } };
+}
+/** Teks sel Excel (shared/inline string), termasuk format superscript/subscript per karakter. */
+function xlRich(root) {
+  if (!root) return '';
+  const R = runBuf();
+  const walk = (el, va) => { for (const c of el.children) { const n = c.localName; if (n === 'rPh' || n === 'rPr' || n === 'phoneticPr') continue; if (n === 'r') { const pr = kidL(c, 'rPr'), v = pr && kidL(pr, 'vertAlign'); walk(c, v ? attrL(v, 'val') : ''); continue; } if (n === 't') { R.add(c.textContent, va); continue; } walk(c, va); } };
+  walk(root, '');
+  return R.done();
 }
 /** Teks persamaan Word (OMML) dalam bentuk sederhana: pecahan a/b, akar √, pangkat & indeks. */
 function mathText(el) {
@@ -775,7 +789,7 @@ async function docxNumFmt(zip) {
   return out;
 }
 function paraInfo(p, numFmt) {
-  let txt = ''; const imgs = [];
+  const R = runBuf(); const imgs = [];
   const pPr = kidL(p, 'pPr'), numPr = pPr && kidL(pPr, 'numPr');
   let list = null;
   if (numPr) { const nid = attrL(kidL(numPr, 'numId'), 'val'), lvl = +(attrL(kidL(numPr, 'ilvl'), 'val') || 0); if (nid && nid !== '0') list = { lvl, fmt: (numFmt[nid] || {})[lvl] || 'decimal' }; }
@@ -784,16 +798,17 @@ function paraInfo(p, numFmt) {
       const n = c.localName;
       if (n === 'pPr' || n === 'rPr' || n === 'Fallback' || n === 'delText' || n === 'instrText' || n === 'del') continue;
       if (n === 'r') { const rPr = kidL(c, 'rPr'), v = rPr && kidL(rPr, 'vertAlign'); walk(c, v ? attrL(v, 'val') : ''); continue; }
-      if (n === 't') { txt += supSub(c.textContent, va); continue; }
-      if (n === 'tab') { txt += ' '; continue; }
-      if (n === 'br' || n === 'cr') { txt += '\n'; continue; }
+      if (n === 't') { R.add(c.textContent, va); continue; }
+      if (n === 'tab') { R.raw(' '); continue; }
+      if (n === 'br' || n === 'cr') { R.raw('\n'); continue; }
       if (n === 'blip') { const id = c.getAttributeNS(R_NS, 'embed'); if (id) imgs.push(id); continue; }
       if (n === 'imagedata') { const id = c.getAttributeNS(R_NS, 'id'); if (id) imgs.push(id); continue; }
-      if (n === 'oMath' || n === 'oMathPara') { txt += mathText(c); continue; }
+      if (n === 'oMath' || n === 'oMathPara') { R.raw(mathText(c)); continue; }
       walk(c, va);
     }
   };
   walk(p, '');
+  const txt = R.done();
   return { text: txt.replace(/ /g, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(), imgs: imgs.filter((v, i, a) => a.indexOf(v) === i), list };
 }
 /** Paragraf dokumen sesuai urutan baca (termasuk isi tabel & content control). */
@@ -905,7 +920,7 @@ async function parseXlsxSoal(file) {
   const wbF = zip.file('xl/workbook.xml'); if (!wbF) throw new Error('Berkas bukan Excel (.xlsx) yang valid.');
   const wb = xmlOf(await wbF.async('string')).documentElement, wbRels = await relsOf(zip, 'xl/_rels/workbook.xml.rels', 'xl/');
   const ss = []; const ssF = zip.file('xl/sharedStrings.xml');
-  if (ssF) kidsL(xmlOf(await ssF.async('string')).documentElement, 'si').forEach((si) => { let s = ''; const walk = (el) => { for (const c of el.children) { if (c.localName === 'rPh') continue; if (c.localName === 't') s += c.textContent; else walk(c); } }; walk(si); ss.push(s); });
+  if (ssF) kidsL(xmlOf(await ssF.async('string')).documentElement, 'si').forEach((si) => { ss.push(xlRich(si)); });
   const sheets = kidsL(descL(wb, 'sheets'), 'sheet').map((s) => ({ name: s.getAttribute('name') || '', path: wbRels[s.getAttributeNS(R_NS, 'id')] })).filter((s) => s.path && zip.file(s.path));
   sheets.sort((a, b) => (/soal/i.test(b.name) ? 1 : 0) - (/soal/i.test(a.name) ? 1 : 0));
   const cellImg = await xlsxCellImages(zip).catch(() => null);
@@ -916,7 +931,7 @@ async function parseXlsxSoal(file) {
       kidsL(r, 'c').forEach((c, ci) => {
         const t = c.getAttribute('t'), ix = c.getAttribute('r') ? colIdx(c.getAttribute('r')) : ci, v = kidL(c, 'v');
         let val = v ? v.textContent : '';
-        if (t === 's') val = ss[+val] || ''; else if (t === 'inlineStr') { val = allL(c, 't').map((x) => x.textContent).join(''); } else if (t === 'b') val = val === '1' ? 'TRUE' : 'FALSE'; else if (t === 'e') val = '';
+        if (t === 's') val = ss[+val] || ''; else if (t === 'inlineStr') { val = xlRich(kidL(c, 'is') || c); } else if (t === 'b') val = val === '1' ? 'TRUE' : 'FALSE'; else if (t === 'e') val = '';
         else if (val && /^-?\d+\.\d{6,}$/.test(val)) val = String(Math.round(Number(val) * 1e6) / 1e6);
         cells[ix] = val;
         if (c.getAttribute('vm')) vmAt[rn] = +c.getAttribute('vm');

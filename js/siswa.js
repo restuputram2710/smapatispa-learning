@@ -405,7 +405,7 @@ function cellCls(i) { const q = X.qs[i]; return 'nb ' + (X.rg.has(q.id) ? 'rg' :
 function exQHTML(q) {
   const n = X.qs.length;
   return `<div class="q-card"><div class="flex items-c g12 wrap jc-b"><span class="q-no">SOAL ${q.no} DARI ${n}</span><span class="small tx2">${TIPE_SOAL[q.tipe]}</span><span class="pill pill-info">Bobot: ${fmtN(q.bobot)} poin</span></div>
-        <div class="divider"></div><div class="q-text">${esc(q.teks)}</div>
+        <div class="divider"></div><div class="q-text">${rumus(q.teks)}</div>
         ${q.img ? `<img class="q-img" src="${esc(IMG_VIA_APP && q.gid && !IMGD[q.gid] ? '' : soalImgSrc(q.img, q.gid))}" data-fid="${esc(q.gid || '')}" alt="Gambar soal" decoding="async" onerror="imgFb(this)" onclick="if(!this.classList.contains('img-err')){const s=this.src;previewPublic('Gambar soal ${q.no}','','IMG');setTimeout(()=>{const im=$('.sheet-bd img');if(im)im.src=s},30)}">` : ''}
         ${q.tipe === 'MCMA' ? `<div class="banner banner-info mt16" style="padding:10px 12px">${I('checkbox', 'ic-sm')}<span>Pilih lebih dari satu jawaban${q.n ? ` (${q.n} jawaban benar)` : ''}.</span></div>` : ''}
       </div>
@@ -436,9 +436,9 @@ function renderExam() {
 }
 function answerArea(q) {
   const v = X.a[q.id];
-  if (q.tipe === 'PG') return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt ${v === o.k ? 'sel' : ''}" data-k="${esc(o.k)}" onclick="ansPG('${q.id}','${o.k}')"><span class="lt">${'ABCDE'[i]}</span><span class="f1 pre">${esc(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`;
-  if (q.tipe === 'MCMA') { const sel = Array.isArray(v) ? v : []; return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt mc ${sel.indexOf(o.k) >= 0 ? 'sel' : ''}" data-k="${esc(o.k)}" data-l="${'ABCDE'[i]}" onclick="ansMC('${q.id}','${o.k}')"><span class="lt">${sel.indexOf(o.k) >= 0 ? I('check', 'ic-sm') : 'ABCDE'[i]}</span><span class="f1 pre">${esc(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`; }
-  if (q.tipe === 'KATEGORI') { const sel = Array.isArray(v) ? v : []; return `<table class="cat-tbl"><thead><tr><th>Pernyataan</th>${q.kat.map((k) => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${q.pern.map((p, i) => `<tr><td>${esc(p)}</td>${q.kat.map((k, ki) => `<td class="rc ${sel[i] === k ? 'on' : ''}" data-r="${i}" data-c="${ki}" onclick="ansKat('${q.id}',${i},${ki})"><span class="rdo"></span></td>`).join('')}</tr>`).join('')}</tbody></table>`; }
+  if (q.tipe === 'PG') return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt ${v === o.k ? 'sel' : ''}" data-k="${esc(o.k)}" onclick="ansPG('${q.id}','${o.k}')"><span class="lt">${'ABCDE'[i]}</span><span class="f1 pre">${rumus(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`;
+  if (q.tipe === 'MCMA') { const sel = Array.isArray(v) ? v : []; return `<div class="opts">${q.opsi.map((o, i) => `<button class="opt mc ${sel.indexOf(o.k) >= 0 ? 'sel' : ''}" data-k="${esc(o.k)}" data-l="${'ABCDE'[i]}" onclick="ansMC('${q.id}','${o.k}')"><span class="lt">${sel.indexOf(o.k) >= 0 ? I('check', 'ic-sm') : 'ABCDE'[i]}</span><span class="f1 pre">${rumus(o.t)}</span>${I('check-c', 'ck ic-lg')}</button>`).join('')}</div>`; }
+  if (q.tipe === 'KATEGORI') { const sel = Array.isArray(v) ? v : []; return `<table class="cat-tbl"><thead><tr><th>Pernyataan</th>${q.kat.map((k) => `<th>${rumus(k)}</th>`).join('')}</tr></thead><tbody>${q.pern.map((p, i) => `<tr><td>${rumus(p)}</td>${q.kat.map((k, ki) => `<td class="rc ${sel[i] === k ? 'on' : ''}" data-r="${i}" data-c="${ki}" onclick="ansKat('${q.id}',${i},${ki})"><span class="rdo"></span></td>`).join('')}</tr>`).join('')}</tbody></table>`; }
   return `<div class="q-card mt16"><textarea class="textarea" id="esaiBox" style="min-height:200px;font-size:16px" maxlength="5000" placeholder="Tulis jawaban esai di sini…" oninput="ansEsai('${q.id}',this.value)">${esc(v || '')}</textarea><div class="flex jc-b small muted mt8"><span>${I('cloud-ok', 'ic-sm')} Tersimpan otomatis</span><span id="esaiCnt">${String(v || '').length}/5000</span></div></div>`;
 }
 function navStats() {
@@ -463,7 +463,7 @@ function openNavSheetEx() {
   closeAllSheets(); exClearToasts();
   const st = navStats(), f0 = st.bel ? 'bel' : 'all';
   const row = (q, i) => { const a = isAnswered(q), r = X.rg.has(q.id), sc = r ? 'rg' : a ? 'ans' : 'bel';
-    const t = String(q.teks || '').replace(/\s+/g, ' ').trim();
+    const t = rumusTeks(q.teks || '').replace(/\s+/g, ' ').trim();
     return `<button class="nv-row s-${sc}${i === X.idx ? ' cur' : ''}" data-i="${i}" onclick="exGo(${i})"><span class="nv-no">${i + 1}</span><span class="f1" style="min-width:0"><span class="nv-t">${esc(t.length > 150 ? t.slice(0, 150) + '…' : t) || (q.img ? '(Soal bergambar)' : '-')}</span><span class="nv-m">${TIPE_SOAL[q.tipe]} · <b>${r ? 'Ragu-ragu' : a ? 'Sudah dijawab' : 'Belum dijawab'}</b></span></span>${I('chev-r', 'ic-sm muted')}</button>`; };
   sheet({ title: 'Daftar Soal', icon: 'list', body: `<div class="nv-wrap" data-f="${f0}">
       <div class="flex items-c jc-b small"><span class="tx2"><b class="mono" data-ex="frac">${st.ans}/${st.n}</b> soal dijawab</span><span class="mono small ${exRemaining() < 600000 ? 'ink-err' : 'tx2'}">${I('clock', 'ic-sm')} <span data-ex="clock">${D.clock(exRemaining())}</span></span></div>
