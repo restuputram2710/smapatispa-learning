@@ -148,7 +148,11 @@ async function apiOnce(action, payload, timeout, reqId) {
     });
     const text = await res.text();
     let j;
-    try { j = JSON.parse(text); } catch (e) { return { success: false, code: 'NET', retryable: res.status >= 500 || res.status === 429, message: 'Server membalas halaman tak terduga (HTTP ' + res.status + '). Periksa GAS_URL di js/config.js.' }; }
+    try { j = JSON.parse(text); } catch (e) {
+      // Google menolak sementara karena terlalu banyak permintaan bersamaan (mis. ratusan siswa ujian serentak) → coba lagi otomatis
+      if (res.status === 429 || res.status === 503 || /too many|simultaneous|invoked too many|try again|server error|temporarily|unavailable|Exceeded/i.test(text.slice(0, 4000))) return { success: false, code: 'BUSY', message: 'Server sedang padat. Mencoba lagi otomatis…' };
+      return { success: false, code: 'NET', retryable: res.status >= 500, message: 'Server membalas halaman tak terduga (HTTP ' + res.status + '). Periksa GAS_URL di js/config.js.' };
+    }
     Perf.add(action, Math.round(performance.now() - t0), j.ms);
     return j;
   } catch (err) {
@@ -173,7 +177,7 @@ function call(action, payload, opt) {
       const res = await apiOnce(action, payload, netN ? Math.round(tmo * 1.6) : tmo, reqId);
       loader(-1, opt.silent);
       if (res.success) { resolve(res.data); return; }
-      if (res.code === 'BUSY' && busyN < maxBusy) { const n = busyN++; setTimeout(attempt, 500 * Math.pow(2, n) + Math.random() * 500); return; }
+      if (res.code === 'BUSY' && busyN < maxBusy) { const n = busyN++; setTimeout(attempt, 500 * Math.pow(2, n) + Math.random() * 1000 * (n + 1)); return; }
       if (res.code === 'NET' && res.retryable !== false && netN < maxNet) { const n = netN++; setTimeout(attempt, 900 * Math.pow(2, n)); return; }
       if (res.code === 'AUTH' && !opt.noAuth) setTimeout(() => logoutLocal(res.message), 10);
       if (res.code === 'MUSTCHANGE') setTimeout(() => showChangePassword(true), 10);

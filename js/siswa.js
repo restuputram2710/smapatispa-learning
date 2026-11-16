@@ -561,7 +561,8 @@ function exKeyDown(e) {
 }
 function scheduleSync() {
   if (!X) return;
-  const jitter = 30000 + Math.random() * 15000;
+  // acak 30–45 detik; bila server padat / koneksi gagal, jeda diperpanjang (×2, ×3, ×4) agar tidak menambah antrean
+  const jitter = (30000 + Math.random() * 15000) * (1 + Math.min(X.syncFail || 0, 3));
   X.timers.push(setTimeout(() => { examSync(false).finally(scheduleSync); }, jitter));
 }
 function examSync(force) {
@@ -574,7 +575,7 @@ function examSync(force) {
   const wasDirtyAt = JSON.stringify(X.a).length + X.rg.size;
   return call('exam.sync', payload, { silent: true, retries: 2, netRetries: 0 }).then((r) => {
     if (!X) return;
-    X.syncing = false; X.lastSync = Date.now();
+    X.syncing = false; X.lastSync = Date.now(); X.syncFail = 0;
     if (JSON.stringify(X.a).length + X.rg.size === wasDirtyAt) X.dirty = false;
     if (r.serverNow) X.off = r.serverNow - Date.now();
     if (r.b && r.b < X.batas - 5000 && X.status === 'MENGERJAKAN') toast('Guru menyelesaikan ujian lebih awal. Jawabanmu dikirim otomatis saat waktu habis — periksa jawabanmu sekarang.', 'warn', 9000);
@@ -584,7 +585,7 @@ function examSync(force) {
     else if (r.st === 'MENGERJAKAN' && X.status === 'TERKUNCI') { X.status = 'MENGERJAKAN'; X.v = r.v; hideOverlay(); toast('Ujian dibuka kembali oleh pengawas. Lanjutkan mengerjakan.', 'ok'); renderExam(); requestFS(); }
     else if (r.st === 'SELESAI' || r.st === 'RESET') { completeExam(r.result || { status: 'SELESAI' }); return; }
     updateExChrome();
-  }).catch(() => { if (X) { X.syncing = false; updateExChrome(); } });
+  }).catch(() => { if (X) { X.syncing = false; X.syncFail = (X.syncFail || 0) + 1; updateExChrome(); } });
 }
 function recoverExam() {   // cache server hilang (sangat jarang): mulai ulang sesi lalu kirim jawaban lokal
   call('exam.start', { ulangan_id: X.ul.ulangan_id, token: '' }, { silent: true }).then((d) => {
@@ -696,8 +697,10 @@ function finishExam(reason) {
   X.submitting = true; saveExLocal();
   const s = sheet({ title: 'Mengirim jawaban', locked: true, body: `<div class="tc" style="padding:20px"><div class="ring" style="border-color:var(--p100);border-top-color:var(--p600);margin:0 auto"></div><h3 class="mt16">${reason === 'WAKTU' ? 'Waktu habis — mengirim jawaban…' : 'Mengirim jawaban…'}</h3><p class="small muted mt8">Jangan tutup aplikasi.</p></div>` });
   const send = (n) => call('exam.submit', { id: X.att.id, ulangan_id: X.ul.ulangan_id, a: X.a, rg: Array.from(X.rg), reason }, { silent: true, retries: 6 }).then((r) => { s.close(); completeExam(r); })
-    .catch((e) => { if (n < 20 && (e.code === 'NET' || e.code === 'BUSY')) { setTimeout(() => send(n + 1), Math.min(15000, 2000 * (n + 1))); s.el.querySelector('h3').textContent = 'Menunggu koneksi… jawaban aman di perangkat'; } else { s.close(); X.submitting = false; failToast(e); } });
-  send(0);
+    .catch((e) => { if (n < 20 && (e.code === 'NET' || e.code === 'BUSY')) { setTimeout(() => send(n + 1), Math.min(15000, 2000 * (n + 1)) + Math.random() * 3000); s.el.querySelector('h3').textContent = 'Menunggu koneksi… jawaban aman di perangkat'; } else { s.close(); X.submitting = false; failToast(e); } });
+  // Waktu habis: ratusan perangkat mencapai 00:00 pada detik yang sama → kiriman disebar acak 0–12 detik
+  // (server tetap menerima jawaban hingga 3 menit setelah waktu habis, dan jawaban terakhir sudah tersimpan berkala).
+  if (reason === 'WAKTU') setTimeout(() => send(0), Math.random() * 12000); else send(0);
 }
 function completeExam(r) {
   const u = X.u;
