@@ -656,7 +656,7 @@ sup,sub{font-size:.72em;line-height:0}
 .nl-t{display:block;font-weight:600;font-size:13.5px}.nl-s{display:block;font-size:11.5px;color:var(--tx3);margin-top:1px}
 .nl-bar{display:block;height:5px;border-radius:99px;background:var(--border);margin-top:6px;overflow:hidden;max-width:260px}.nl-bar i{display:block;height:100%;border-radius:99px}
 .fx-anim .nl-bar i{animation:nlBar .9s cubic-bezier(.2,.8,.2,1) backwards .3s}@keyframes nlBar{from{width:0}}
-.nl-v{flex:none;font-family:var(--f-head);font-size:20px;min-width:40px;text-align:right}.nl-v.ok{color:var(--ok)}.nl-v.low{color:var(--warn)}
+.nl-v{flex:none;font-family:var(--f-head);font-size:20px;min-width:40px;text-align:right}.nl-v.ok{color:var(--ok)}.nl-v.low{color:var(--warn)}.nl-vw{flex:none;display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}.nl-v.tmp{color:#7C3AED}.nl-tmp{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#7C3AED;margin-top:2px}[data-theme="dark"] .nl-v.tmp,[data-theme="dark"] .nl-tmp{color:#C4B5FD}.nl-chip.tmp{color:#7C3AED}[data-theme="dark"] .nl-chip.tmp{color:#C4B5FD}
 @media(prefers-reduced-motion:reduce){.fx-anim .nl-arc,.fx-anim .nl-bar i{animation:none}}
 
 /* ── 18b. CBT: lapisan dialog di atas layar ujian, progres, transisi soal, daftar soal, tombol Selesai bertoleransi ── */
@@ -731,6 +731,7 @@ sup,sub{font-size:.72em;line-height:0}
 .uj-on{border-color:var(--err)!important;box-shadow:0 0 0 2px rgba(220,38,38,.18)}.uj-dim{opacity:.5}
 .uj-chk{position:absolute;top:14px;right:14px;width:24px;height:24px;border-radius:7px;border:2px solid var(--divider);display:grid;place-items:center;background:var(--surface);color:#fff;z-index:1}
 .uj-on .uj-chk{background:var(--err);border-color:var(--err)}
+.tg-sel .ml-a{visibility:hidden}
 
 /* ── 19. Grafik SVG ── */
 .chart{width:100%;display:block;overflow:visible}

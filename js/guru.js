@@ -62,8 +62,9 @@ function uniqBy(a, f) { const s = {}; return a.filter((x) => { const k = f(x); i
 // ── Materi & Tugas (daftar + composer) ──
 route('g-konten', {
   title: 'Materi & Tugas', roles: ['GURU', 'ADMIN'], form: true,
+  leave() { S.c.tgSel = null; },
   render(p) {
-    const g = G(), tab = p.tab || 'semua', F = S.c.kontenF || (S.c.kontenF = { mapel: '', kelas: '', q: '' });
+    const g = G(), tab = p.tab || 'semua', F = S.c.kontenF || (S.c.kontenF = { mapel: '', kelas: '', q: '' }), SEL = S.c.tgSel;
     let items = [];
     if (tab !== 'tugas') items = items.concat(g.materi.map((m) => Object.assign({ _t: 'materi', _d: m.dibuat_pada }, m)));
     if (tab !== 'materi') items = items.concat(g.tugas.map((x) => Object.assign({ _t: 'tugas', _d: x.dibuat_pada }, x)));
@@ -74,10 +75,13 @@ route('g-konten', {
         <div class="input-ic w100">${I('search')}<input class="input input-sm" placeholder="Cari dalam daftar…" value="${esc(F.q)}" oninput="S.c.kontenF.q=this.value;rerenderKeepFocus()"></div>
         <div class="flex g8 w100"><select class="select input-sm f1" onchange="S.c.kontenF.mapel=this.value;rerender()"><option value="">Semua mapel</option>${mapels.map((m) => `<option value="${m.mapel_id}" ${F.mapel === m.mapel_id ? 'selected' : ''}>Mapel: ${esc(mapelNm(m.mapel_id))}</option>`).join('')}</select>
           <select class="select input-sm f1" onchange="S.c.kontenF.kelas=this.value;rerender()"><option value="">Semua kelas</option>${kelas.map((k) => `<option value="${k.kelas_id}" ${F.kelas === k.kelas_id ? 'selected' : ''}>Kelas: ${esc(kelasShort(k.kelas_id))}</option>`).join('')}</select></div>
-        <div class="seg">${[['semua', 'Semua'], ['materi', `Materi (${g.materi.length})`], ['tugas', `Tugas (${g.tugas.length})`]].map((t) => `<button class="${tab === t[0] ? 'on' : ''}" onclick="go('g-konten',Object.assign({},S.params,{tab:'${t[0]}'}),{replace:true})">${t[1]}</button>`).join('')}</div></div>
+        <div class="flex items-c g8 w100 wrap"><div class="seg">${[['semua', 'Semua'], ['materi', `Materi (${g.materi.length})`], ['tugas', `Tugas (${g.tugas.length})`]].map((t) => `<button class="${tab === t[0] ? 'on' : ''}" onclick="go('g-konten',Object.assign({},S.params,{tab:'${t[0]}'}),{replace:true})">${t[1]}</button>`).join('')}</div>
+          ${!form && g.tugas.some(tgCanDel) ? `<button class="btn ${SEL ? 'btn-secondary' : 'btn-ghost'} btn-sm ml-a" onclick="S.c.tgSel=S.c.tgSel?null:{};rerender()">${I(SEL ? 'x' : 'checkbox', 'ic-sm')}${SEL ? 'Batal pilih' : 'Pilih & hapus tugas'}</button>` : ''}</div>
+        ${SEL ? tgSelBar(items) : ''}</div>
       <div style="padding:12px;max-height:${form ? '78vh' : 'none'};overflow:auto" class="col g12">${items.map(kontenCard).join('') || emptyState('inbox', 'Belum ada konten', 'Buat materi atau tugas pertama Anda.', `<button class="btn btn-primary" onclick="go('g-konten',{form:'tugas'})">${I('plus')}Buat Tugas</button>`)}</div></div>`;
+    const nSel = SEL ? Object.keys(SEL).length : 0;
     if (!form) return `<div class="page"><div class="page-hd"><div><h1>Materi & Tugas</h1><p class="sub">Bagikan materi, buat tugas, dan pantau pengumpulan siswa.</p></div><div class="flex g8"><button class="btn btn-secondary" onclick="go('g-konten',{form:'materi'})">${I('upload')}Materi Baru</button><button class="btn btn-primary" onclick="go('g-konten',{form:'tugas'})">${I('plus')}Tugas Baru</button></div></div>${list}</div>
-      <button class="fab" onclick="openCreateMenu(this)" aria-label="Buat">${I('plus', 'ic-lg')}</button>`;
+      ${SEL && nSel ? `<div class="sticky-bar"><span class="small f1"><b>${nSel}</b> tugas dipilih</span><button class="btn btn-ghost" onclick="S.c.tgSel={};rerender()">Kosongkan</button><button class="btn btn-danger btn-lg" onclick="deleteTugas(Object.keys(S.c.tgSel))">${I('trash')}Hapus ${nSel} Tugas</button></div>` : SEL ? '' : `<button class="fab" onclick="openCreateMenu(this)" aria-label="Buat">${I('plus', 'ic-lg')}</button>`}`;
     return `<div class="page"><div class="split s-l"><div class="only-lg">${list}</div><div>${kontenForm(form, p.edit)}</div></div></div>`;
   },
   mount(p) { if (p.form || p.edit) bindKontenForm(); }
@@ -89,11 +93,62 @@ function kontenCard(x) {
       <div class="bold mt8 clamp2">${esc(x.judul)}</div><div class="small muted mt4">${esc(mapelNm(x.mapel_id))} · ${esc(kelasShort(x.kelas_id))}</div>
       <div class="flex items-c jc-b mt12 small" style="border-top:1px solid var(--border);padding-top:10px"><span class="muted flex items-c g4">${I('calendar', 'ic-sm')}${D.d(x.dibuat_pada)}</span><span class="flex g4"><button class="btn btn-xs btn-ghost" onclick="openMateri('${x.materi_id}')">Lihat ${I('chev-r', 'ic-sm')}</button><button class="btn btn-xs btn-ghost" onclick="go('g-konten',{edit:'${x.materi_id}'})">${I('edit', 'ic-sm')}</button><button class="btn btn-xs btn-ghost ink-err" onclick="deleteMateri('${x.materi_id}')">${I('trash', 'ic-sm')}</button></span></div></div>`;
   }
-  const lewat = now() > x.tenggat, sel = S.params.edit === x.tugas_id;
+  const lewat = now() > x.tenggat, sel = S.params.edit === x.tugas_id, SEL = S.c.tgSel, can = tgCanDel(x), on = SEL && SEL[x.tugas_id];
+  if (SEL) return `<div class="card uj-card tg-sel ${on ? 'uj-on' : ''} ${can ? '' : 'uj-dim'}" style="padding:14px" ${can ? `onclick="tgToggle('${x.tugas_id}')" role="button"` : ''}>${can ? `<span class="uj-chk">${on ? I('check', 'ic-sm') : ''}</span>` : ''}<div class="flex items-c g8"><div class="tile sm warn">${I('clipboard')}</div><span class="xs bold upper muted">${x.status === 'DRAF' ? 'Draf' : lewat ? 'Tugas selesai' : 'Tugas aktif'}</span></div>
+    <div class="bold mt8 clamp2" style="padding-right:30px">${esc(x.judul)}</div><div class="small muted mt4">${esc(mapelNm(x.mapel_id))} · ${esc(kelasShort(x.kelas_id))} · Tenggat ${D.d(x.tenggat)}</div><div class="small muted mt4">${x.kumpul || 0} pengumpulan${x.dinilai ? ' · ' + x.dinilai + ' dinilai' : ''}</div></div>`;
   return `<div class="card hoverable ${sel ? 'sel' : ''}" style="padding:14px" onclick="go('g-tugas',{id:'${x.tugas_id}'})"><div class="flex items-c g8"><div class="tile sm warn">${I('clipboard')}</div><span class="xs bold upper ${x.status === 'DRAF' ? 'muted' : lewat ? 'muted' : 'ink-p'}">${x.status === 'DRAF' ? 'Draf' : lewat ? 'Tugas selesai' : 'Tugas aktif'}</span><span class="ml-a">${x.status === 'DRAF' ? pill('Draf', 'neu') : pill(`${x.kumpul}/${x.total} kumpul`, x.kumpul >= x.total ? 'ok' : 'info')}</span></div>
     <div class="bold mt8 clamp2">${esc(x.judul)}</div><div class="small mt4 ${lewat ? 'muted' : 'ink-warn'} flex items-c g4">${I('clock', 'ic-sm')}Tenggat: ${D.rel(x.tenggat)}</div>
     <div class="small muted mt4">${esc(mapelNm(x.mapel_id))} · ${esc(kelasShort(x.kelas_id))}</div><div class="meter mt8"><i style="width:${x.total ? x.kumpul / x.total * 100 : 0}%"></i></div>
-    ${x.kumpul > x.dinilai ? `<div class="small mt8 ink-warn bold">${x.kumpul - x.dinilai} perlu dinilai</div>` : ''}</div>`;
+    <div class="flex items-c jc-b mt8 small"><span class="${x.kumpul > x.dinilai ? 'ink-warn bold' : 'muted'}">${x.kumpul > x.dinilai ? `${x.kumpul - x.dinilai} perlu dinilai` : ''}</span>${can ? `<button class="btn btn-xs btn-ghost ink-err" title="Hapus tugas" aria-label="Hapus tugas" onclick="event.stopPropagation();deleteTugas(['${x.tugas_id}'])">${I('trash', 'ic-sm')}</button>` : ''}</div></div>`;
+}
+/** Tugas yang bisa dihapus: milik guru ini (Admin: semua). Tugas yang belum tersimpan (sedang dikirim) tidak bisa dihapus. */
+function tgCanDel(x) { return !x._pending && String(x.tugas_id).indexOf('tmp-') !== 0 && (hasRole('ADMIN') || G().penugasan.some((p) => p.penugasan_id === x.penugasan_id)); }
+function tgToggle(id) { const s = S.c.tgSel; if (!s) return; if (s[id]) delete s[id]; else s[id] = 1; rerender(); }
+function tgSelBar(items) {
+  const t = now(), ts = items.filter((x) => x._t === 'tugas' && tgCanDel(x));
+  const lama = ts.filter((x) => t - num(x.tenggat) > 30 * 864e5).map((x) => x.tugas_id), semua = ts.map((x) => x.tugas_id);
+  const btn = (ids, label) => ids.length ? `<button class="btn btn-ghost btn-sm" onclick='tgSelAll(${JSON.stringify(ids)})'>${label} (${ids.length})</button>` : '';
+  return `<div class="banner banner-info w100" style="align-items:center;flex-wrap:wrap">${I('info')}<div class="small" style="flex:1 1 200px;min-width:0">Ketuk kartu tugas untuk memilih. Nilai & jawaban siswa dicadangkan ke Google Drive sebelum dihapus.</div><div class="flex g4 wrap">${btn(lama, 'Tenggat > 30 hari lalu')}${btn(semua, 'Semua yang tampil')}</div></div>`;
+}
+function tgSelAll(ids) { const s = S.c.tgSel || (S.c.tgSel = {}); const all = ids.every((id) => s[id]); ids.forEach((id) => { if (all) delete s[id]; else s[id] = 1; }); rerender(); }
+/**
+ * Hapus satu/banyak tugas. Server dulu menghitung dampaknya (pengumpulan, nilai, berkas), lalu guru mengonfirmasi.
+ * Tugas yang sudah dinilai butuh centang "saya mengerti". Cadangan nilai & jawaban otomatis ke Drive (Cadangan › Tugas Terhapus).
+ */
+function deleteTugas(ids) {
+  ids = [].concat(ids).filter((id) => id && String(id).indexOf('tmp-') !== 0);
+  if (!ids.length || srvOld('2.6.2', 'Hapus tugas')) return;
+  const wait = sheet({ title: 'Memeriksa tugas…', locked: true, body: '<div class="tc" style="padding:24px"><div class="ring" style="border-color:var(--p100);border-top-color:var(--p600);margin:0 auto"></div></div>' });
+  call('tugas.delete', { tugas_ids: ids, dry: true }).then((r) => {
+    wait.close();
+    const g = G(), nm = ids.map((id) => g.tugas.find((x) => x.tugas_id === id)).filter(Boolean);
+    if (!r.tugas) { g.tugas = g.tugas.filter((x) => ids.indexOf(x.tugas_id) < 0); S.boot.guru.tugas = g.tugas; S.c.tgSel = null; saveSnap(); rerender(); toast('Tugas sudah tidak ada (mungkin sudah dihapus).', 'info'); return; }
+    sheet({ title: `Hapus ${r.tugas} tugas?`, icon: 'trash', body: `<div class="col g12">
+        ${r.kumpul ? `<div class="banner banner-warn">${I('alert')}<div class="small"><b>${r.kumpul} pengumpulan siswa</b>${r.dinilai ? ` (${r.dinilai} sudah dinilai)` : ''} ikut terhapus${r.dinilai ? ' — nilainya hilang dari rekap nilai siswa' : ''}.</div></div>` : ''}
+        ${r.aktif ? `<div class="banner banner-info">${I('clock')}<div class="small"><b>${r.aktif} tugas masih berjalan</b> (tenggat belum lewat) — siswa tidak bisa mengumpulkan lagi.</div></div>` : ''}
+        <div class="col g8" style="max-height:200px;overflow:auto">${nm.map((x) => `<div class="info-tile"><div class="f1" style="min-width:0"><div class="small bold truncate">${esc(x.judul)}</div><div class="xs muted">${esc(mapelNm(x.mapel_id))} · ${esc(kelasShort(x.kelas_id))} · ${x.kumpul || 0} pengumpulan</div></div></div>`).join('')}</div>
+        ${r.kumpul ? `<p class="small tx2">${I('shield', 'ic-sm ink-ok')} Salinan tugas beserta jawaban & nilai siswa otomatis disimpan ke Google Drive sekolah (folder <b>Cadangan › Tugas Terhapus</b>).</p>` : ''}
+        ${r.berkas ? `<label class="check"><input type="checkbox" id="tgBerkas" checked><span>Pindahkan juga <b>${r.berkas} berkas</b> (lampiran & kiriman siswa) ke Sampah Google Drive agar penyimpanan tidak penuh — masih bisa dipulihkan 30 hari.</span></label>` : ''}
+        ${r.dinilai ? `<label class="check"><input type="checkbox" id="tgPaham"><span>Saya mengerti nilai tugas ini ikut terhapus dari rekap.</span></label>` : ''}</div>`,
+      foot: `<button class="btn btn-secondary" data-x2>Batal</button><button class="btn btn-danger" id="tgGo" ${r.dinilai ? 'disabled' : ''}>${I('trash')}Hapus ${r.tugas} Tugas</button>`,
+      mount: (el, close) => {
+        el.querySelector('[data-x2]').onclick = close;
+        const go2 = $('#tgGo', el), paham = $('#tgPaham', el), berkas = $('#tgBerkas', el);
+        if (paham) paham.onchange = () => { go2.disabled = !paham.checked; };
+        go2.onclick = () => {
+          btnBusy(go2, true, 'Menghapus…');
+          call('tugas.delete', { tugas_ids: ids, hapus_berkas: !!(berkas && berkas.checked) }, { timeout: 150000 }).then((res) => {
+            const del = {}; (res.ids || []).forEach((id) => { del[id] = 1; });
+            g.tugas = g.tugas.filter((x) => !del[x.tugas_id]); S.boot.guru.tugas = g.tugas;
+            if (g.stats) g.stats.perluDinilai = g.tugas.filter((x) => x.status === 'TERBIT').reduce((n, x) => n + Math.max(0, (x.kumpul || 0) - (x.dinilai || 0)), 0);
+            Object.keys(del).forEach((id) => drop('td_' + id));
+            S.c.tgSel = null; saveSnap(); close();
+            toast(`${res.deleted} tugas dihapus${res.cadangan ? ' · cadangan di Drive (Cadangan › Tugas Terhapus)' : ''}${res.berkas ? ` · ${res.berkas} berkas ke Sampah Drive` : ''}${res.sisa_berkas ? ` · ${res.sisa_berkas} berkas belum terhapus` : ''}.`, 'ok', 8000);
+            if (S.route === 'g-tugas' && del[S.params.id]) go('g-konten', { tab: 'tugas' }, { replace: true }); else rerender();
+          }).catch((e) => { btnBusy(go2, false); failToast(e); });
+        };
+      } });
+  }).catch((e) => { wait.close(); failToast(e); });
 }
 function kontenForm(form, editId) {
   const g = G(), isT = form === 'tugas';
@@ -199,7 +254,12 @@ route('g-tugas', {
   title: 'Pantau & Penilaian', roles: ['GURU', 'ADMIN', 'WALI'], back: 'g-konten', nav: 'g-konten', form: true,
   render(p) {
     const t0 = G().tugas.find((x) => x.tugas_id === p.id);
-    const d = String(p.id).indexOf('tmp-') === 0 ? null : need('td_' + p.id, 'tugas.detail', { tugas_id: p.id }, 20000);
+    const er = S.c['td_' + p.id] && S.c['td_' + p.id].d === undefined && S.c['td_' + p.id].err;
+    const d = String(p.id).indexOf('tmp-') === 0 || (er && er.code === 'NOTFOUND') ? null : need('td_' + p.id, 'tugas.detail', { tugas_id: p.id }, 20000);
+    if (!d && er && er.code === 'NOTFOUND') {   // sudah dihapus (mis. dari perangkat lain): jangan memuat terus-menerus
+      if (t0) { S.boot.guru.tugas = G().tugas.filter((x) => x.tugas_id !== p.id); saveSnap(); }
+      return `<div class="page">${emptyState('clipboard', 'Tugas tidak ditemukan', 'Tugas ini mungkin sudah dihapus.', `<button class="btn btn-primary" onclick="go('g-konten',{tab:'tugas'})">Kembali ke Daftar Tugas</button>`)}</div>`;
+    }
     if (!d) return t0 ? `<div class="page"><h1>${esc(t0.judul)}</h1><p class="muted mt8">Memuat data pengumpulan…</p><div class="split mt16"><div>${skelCards(4, 30)}</div><div>${skelCards(1, 200)}</div></div></div>` : skelPage();
     const t = d.tugas, tab = p.tab || 'semua', q = (S.c.tdQ || '').toLowerCase();
     const sudah = d.siswa.filter((s) => s.kumpul && !s.kumpul.terlambat), belum = d.siswa.filter((s) => !s.kumpul), telat = d.siswa.filter((s) => s.kumpul && s.kumpul.terlambat);
@@ -214,7 +274,7 @@ route('g-tugas', {
       <button class="back-link" onclick="back('g-konten')">${I('arrow-l', 'ic-sm')}Kembali ke Daftar Tugas</button>
       <div class="page-hd" style="margin-bottom:12px"><div style="min-width:0"><div class="flex items-c g12 wrap"><h1 style="font-size:26px">${esc(t.judul)}</h1>${now() > t.tenggat ? pill('Tenggat lewat', 'neu') : pill('Aktif berjalan', 'ok')}</div>
         <p class="tx2 mt8 flex wrap g12 small"><span class="ink-p bold">${I('book', 'ic-sm')} ${esc(mapelNm(t.mapel_id))}</span><span>Kelas ${esc(kelasNm(t.kelas_id))}</span><span>${I('clock', 'ic-sm')} Tenggat: <b>${D.rel(t.tenggat)}</b></span><span class="mono">Nilai maks: ${t.nilai_maks}</span></p></div>
-        <div class="flex g8 wrap">${hasRole('GURU') || hasRole('ADMIN') ? `<button class="btn btn-ghost btn-sm" onclick="go('g-konten',{edit:'${t.tugas_id}'})">${I('edit', 'ic-sm')}Ubah</button>
+        <div class="flex g8 wrap">${hasRole('GURU') || hasRole('ADMIN') ? `<button class="btn btn-ghost btn-sm" onclick="go('g-konten',{edit:'${t.tugas_id}'})">${I('edit', 'ic-sm')}Ubah</button>${tgCanDel(t0 || t) ? `<button class="btn btn-ghost btn-sm ink-err" onclick="deleteTugas(['${t.tugas_id}'])">${I('trash', 'ic-sm')}Hapus</button>` : ''}
           <div class="split-btn"><button class="btn btn-primary" ${!belum.length || !canRemind ? 'disabled' : ''} onclick="remindTugas('${t.tugas_id}',['DASHBOARD','EMAIL','WA'])">${I('send')}Kirim Pengingat ke yang Belum</button><button class="btn btn-primary" ${!belum.length || !canRemind ? 'disabled' : ''} onclick="remindMenu(this,'${t.tugas_id}')">${I('chev-d', 'ic-sm')}</button></div>` : ''}</div></div>
       ${showRemindBanner ? `<div class="banner banner-ok mb16">${I('check-c')}<div class="f1"><b>Pengingat berhasil terkirim ke ${S.c.remindBanner.n} siswa</b> via ${esc(S.c.remindBanner.via)}. <span class="small">(Pengingat manual berikutnya tersedia ${Math.max(1, Math.ceil((3600000 - (now() - lastR)) / 60000))} menit lagi.)</span></div></div>` : !canRemind && belum.length ? `<div class="banner banner-info mb16">${I('clock')}<div>Pengingat terakhir dikirim ${D.ago(lastR)}. Pengingat berikutnya tersedia ${Math.ceil((3600000 - (now() - lastR)) / 60000)} menit lagi.</div></div>` : ''}
       <div class="grid gc4 mb16">${statCard('Sudah kumpul', sudah.length + telat.length, '/' + d.siswa.length, telat.length ? telat.length + ' terlambat' : 'Tepat waktu semua', 'check-c', 'ok')}${statCard('Belum kumpul', belum.length, 'siswa', '', 'alert-c', belum.length ? 'err' : '')}${statCard('Perlu dinilai', perlu.length, '', '', 'star', perlu.length ? 'warn' : '')}${statCard('Rata-rata nilai', fmtN(avg(d.siswa.filter((s) => s.kumpul && s.kumpul.nilai !== null).map((s) => s.kumpul.nilai))), '', 'dari ' + t.nilai_maks, 'chart', 'p')}</div>

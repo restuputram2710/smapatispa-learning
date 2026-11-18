@@ -44,7 +44,7 @@ function openAgendaDetail(id) {
 
 route('s-home', {
   title: 'Beranda', roles: ['SISWA'], bare: true,
-  mount() { fxMount(); }, leave() { fxStop(); },
+  mount() { fxMount(); nilaiSegarkan(); }, leave() { fxStop(); },
   render() {
     const u = me(), sw = SW(), t = now();
     const belum = sw.tugas.filter((x) => !x.my).sort(by('tenggat'));
@@ -90,27 +90,38 @@ route('s-home', {
       </div></div>`;
   }
 });
+/** Ada nilai sementara (esai belum dikoreksi) & data beranda sudah > 2 menit → ambil data terbaru diam-diam agar nilai hasil koreksi guru langsung tampil. */
+function nilaiSegarkan() {
+  const sw = S.boot && S.boot.siswa; if (!sw || S.c.nlRf || Date.now() - (S.c.nlRfAt || 0) < 60000) return;
+  const wait = (sw.ulangan || []).some((u) => u.my && u.my.status_nilai === 'MENUNGGU_KOREKSI');
+  if (!wait || now() - num(B().serverNow) < 120000) return;
+  S.c.nlRf = 1; S.c.nlRfAt = Date.now();
+  refreshBoot(true).catch(() => { /* luring: tetap tampilkan data terakhir */ }).then(() => { S.c.nlRf = 0; });
+}
 /** Nilai ulangan siswa di beranda: rata-rata, tertinggi, tren, dan daftar ulangan terbaru — penyemangat belajar. */
 function homeNilai(sw) {
   const kkm = myKkm();
   const done = sw.ulangan.filter((u) => u.my && (u.my.status === 'SELESAI' || u.my.status === 'TERKUNCI')).sort((a, b) => (num(b.my.selesai) || b.buka) - (num(a.my.selesai) || a.buka));
   if (!done.length) return '';
-  const graded = done.filter((u) => u.my.nilai !== null && u.my.nilai !== undefined && u.my.status_nilai !== 'MENUNGGU_KOREKSI');
+  // nilai yang esainya belum dikoreksi tetap tampil sebagai "nilai sementara" (diperbarui otomatis setelah guru mengoreksi)
+  const graded = done.filter((u) => u.my.nilai !== null && u.my.nilai !== undefined);
+  const prov = graded.filter((u) => u.my.status_nilai === 'MENUNGGU_KOREKSI').length;
   const vals = graded.map((u) => num(u.my.nilai)), avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   const best = graded.slice().sort((a, b) => num(b.my.nilai) - num(a.my.nilai))[0], tuntas = vals.filter((v) => v >= kkm).length;
   const tr = vals.length >= 2 ? vals[0] - vals[1] : null;
-  const msg = avg === null ? 'Nilaimu sedang dikoreksi guru. Tunggu ya!'
+  const msg = avg === null ? 'Nilaimu akan tampil setelah diumumkan guru.'
+    : prov && prov === vals.length ? 'Nilaimu masih sementara karena jawaban esai sedang dikoreksi guru. Nilai akan diperbarui otomatis.'
     : avg >= 90 ? 'Luar biasa! Kamu di jalur juara — pertahankan!' : tr !== null && tr > 0 ? `Mantap! Nilai terbarumu naik ${fmtN(tr)} poin. Terus semangat!`
     : avg >= kkm ? `Kamu sudah tuntas KKM ${kkm}. Ayo raih nilai yang lebih tinggi!` : `Semangat! Rata-ratamu ${fmtN(kkm - avg)} poin lagi menuju KKM ${kkm}. Kamu pasti bisa!`;
   const col = avg === null ? 'var(--tx3)' : avg >= kkm ? '#16A34A' : '#D97706', C = 2 * Math.PI * 42, f = avg === null ? 0 : Math.max(0, Math.min(1, avg / 100));
   const row = (u) => { const m = u.my, n = m.nilai, wait = m.status_nilai === 'MENUNGGU_KOREKSI', hid = n === null || n === undefined;
     return `<button class="nl-row" onclick="go('s-nilai')"><span class="nl-mp mp${hashN(u.mapel_id) % 6}">${I(mapelBy(u.mapel_id).ikon || 'book', 'ic-sm')}</span><span class="f1" style="min-width:0"><span class="nl-t truncate">${esc(u.judul)}</span><span class="nl-s">${esc(mapelNm(u.mapel_id))} · ${esc(JENIS_UL[u.jenis] || u.jenis)}</span>
-      ${!hid && !wait ? `<span class="nl-bar"><i style="width:${Math.max(0, Math.min(100, n))}%;background:${n >= kkm ? 'var(--ok)' : 'var(--warn)'}"></i></span>` : ''}</span>
-      ${wait ? '<span class="pill pill-vio">Dikoreksi</span>' : hid ? '<span class="xs muted">Belum diumumkan</span>' : `<b class="nl-v ${n >= kkm ? 'ok' : 'low'}" ${Number.isInteger(n) ? `data-count="${n}"` : ''}>${fmtN(n)}</b>`}</button>`; };
+      ${!hid ? `<span class="nl-bar"><i style="width:${Math.max(0, Math.min(100, n))}%;background:${wait ? 'var(--vio, #7C3AED)' : n >= kkm ? 'var(--ok)' : 'var(--warn)'}"></i></span>` : ''}</span>
+      ${hid ? (wait ? '<span class="pill pill-vio">Dikoreksi</span>' : '<span class="xs muted">Belum diumumkan</span>') : `<span class="nl-vw"><b class="nl-v ${wait ? 'tmp' : n >= kkm ? 'ok' : 'low'}" ${Number.isInteger(n) ? `data-count="${n}"` : ''}>${fmtN(n)}</b>${wait ? '<span class="nl-tmp">sementara</span>' : ''}</span>`}</button>`; };
   return `<div class="sect-title"><h2>Nilai Ulanganmu</h2><a class="ml-a" href="javascript:void(0)" onclick="go('s-nilai')">Semua Nilai ${I('chev-r', 'ic-sm')}</a></div>
     <div class="card nl-card"><div class="nl-hd"><div class="nl-ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="9"/>${f > 0 ? `<circle class="nl-arc" cx="50" cy="50" r="42" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * f} ${C}" transform="rotate(-90 50 50)"/>` : ''}</svg><div class="nl-avg"><b ${avg !== null ? `data-count="${Math.round(avg)}"` : ''}>${avg === null ? '–' : fmtN(Math.round(avg))}</b><span>rata-rata</span></div></div>
       <div class="f1" style="min-width:0"><div class="nl-msg">${I(avg !== null && avg >= kkm ? 'star' : 'sparkles', 'ic-sm')}<span>${esc(msg)}</span></div>
-        <div class="nl-chips">${best ? `<span class="nl-chip">${I('trending', 'ic-sm')}Tertinggi <b>${fmtN(best.my.nilai)}</b> ${esc(mapelNm(best.mapel_id))}</span>` : ''}${vals.length ? `<span class="nl-chip">${I('check-c', 'ic-sm')}Tuntas <b>${tuntas}/${vals.length}</b></span>` : ''}${tr !== null ? `<span class="nl-chip ${tr >= 0 ? 'up' : 'down'}">${I(tr >= 0 ? 'chev-u' : 'chev-d', 'ic-sm')}${tr >= 0 ? 'Naik' : 'Turun'} <b>${fmtN(Math.abs(tr))}</b></span>` : ''}</div></div></div>
+        <div class="nl-chips">${best ? `<span class="nl-chip">${I('trending', 'ic-sm')}Tertinggi <b>${fmtN(best.my.nilai)}</b> ${esc(mapelNm(best.mapel_id))}</span>` : ''}${vals.length ? `<span class="nl-chip">${I('check-c', 'ic-sm')}Tuntas <b>${tuntas}/${vals.length}</b></span>` : ''}${tr !== null ? `<span class="nl-chip ${tr >= 0 ? 'up' : 'down'}">${I(tr >= 0 ? 'chev-u' : 'chev-d', 'ic-sm')}${tr >= 0 ? 'Naik' : 'Turun'} <b>${fmtN(Math.abs(tr))}</b></span>` : ''}${prov ? `<span class="nl-chip tmp" title="Nilai esai masih dikoreksi guru — nilai akan diperbarui otomatis.">${I('pen', 'ic-sm')}<b>${prov}</b> nilai sementara</span>` : ''}</div></div></div>
       <div class="nl-list">${done.slice(0, 5).map(row).join('')}</div></div>`;
 }
 /** Sorotan beranda siswa: ujian berlangsung, tenggat terdekat, ujian segera, nilai terbaru, agenda — bergeser otomatis. */
@@ -298,7 +309,7 @@ route('s-nilai', {
       const keys = Object.keys(d.nilai);
       return `<div class="page">${head}<div class="card mt16">${keys.length ? keys.map((mp) => { const n = d.nilai[mp], open = S.c.openMapel === mp;
         return `<div class="row-item click" onclick="S.c.openMapel=S.c.openMapel==='${mp}'?null:'${mp}';rerender()">${mapelIcon(mp, 'sm')}<div class="f1" style="min-width:0"><div class="bold">${esc(mapelNm(mp))}</div><div class="meter mt8" style="max-width:280px"><i style="width:${clamp(n.rata || 0, 0, 100)}%"></i></div></div><div class="tr"><div class="b7" style="font-family:var(--f-head);font-size:20px">${fmtN(n.rata)}</div><div class="xs muted">rata-rata</div></div>${I(open ? 'chev-u' : 'chev-d', 'muted')}</div>
-          ${open ? `<div style="padding:4px 16px 16px 64px" class="col g8">${n.tugas.map((x) => `<div class="flex jc-b g12 small"><span class="truncate">${I('clipboard', 'ic-sm muted')} ${esc(x.judul)}</span><b class="mono">${fmtN(x.nilai)}/${x.maks}</b></div>`).join('')}${n.ujian.map((x) => `<div class="flex jc-b g12 small"><span class="truncate">${I('exam', 'ic-sm muted')} ${esc(x.judul)}</span><b class="mono">${x.status_nilai === 'MENUNGGU_KOREKSI' ? '<span class="pill pill-vio">Menunggu koreksi</span>' : fmtN(x.n)}</b></div>`).join('')}</div>` : ''}`; }).join('') : emptyState('star', 'Belum ada nilai', 'Nilai tugas dan ujian akan tampil di sini setelah dinilai guru.')}</div></div>`;
+          ${open ? `<div style="padding:4px 16px 16px 64px" class="col g8">${n.tugas.map((x) => `<div class="flex jc-b g12 small"><span class="truncate">${I('clipboard', 'ic-sm muted')} ${esc(x.judul)}</span><b class="mono">${fmtN(x.nilai)}/${x.maks}</b></div>`).join('')}${n.ujian.map((x) => `<div class="flex jc-b g12 small"><span class="truncate">${I('exam', 'ic-sm muted')} ${esc(x.judul)}</span><b class="mono">${fmtN(x.n)}${x.status_nilai === 'MENUNGGU_KOREKSI' ? ' <span class="pill pill-vio" title="Esai masih dikoreksi guru — nilai akan diperbarui">sementara</span>' : ''}</b></div>`).join('')}</div>` : ''}`; }).join('') : emptyState('star', 'Belum ada nilai', 'Nilai tugas dan ujian akan tampil di sini setelah dinilai guru.')}</div></div>`;
     }
     const a = d.absensi.total, tot = a.H + a.S + a.I + a.A;
     const mon = S.c.attMon || D.ymd(now()).slice(0, 7);
