@@ -728,6 +728,7 @@ route('g-ujian', {
           <h3 class="mt12" style="font-size:17px">${esc(u.judul)}</h3><p class="small muted mt4">${esc(mapelNm(u.mapel_id))} · Kelas ${u.kelas_ids.map(kelasShort).join(', ')} · ${u.jumlah_soal} soal · ${u.durasi_menit} menit</p>
           <p class="small tx2 mt8 flex items-c g6">${I('calendar', 'ic-sm')}${D.dt(u.buka)} – ${D.rel(u.tutup)}</p>
           <div class="flex items-c g8 mt12"><div class="f1"><div class="meter"><i style="width:${u.peserta ? u.selesai / u.peserta * 100 : 0}%"></i></div></div><span class="mono xs">${u.selesai}/${u.peserta} selesai</span></div>
+          ${!SEL && st.k === 'SELESAI' && ujSisa(u) ? `<div class="banner banner-warn mt12" style="align-items:center">${I('alert')}<div class="small f1"><b>${ujSisa(u)} siswa</b> sudah mulai tetapi jawabannya belum terkirim (aplikasi ditutup sebelum selesai).</div><button class="btn btn-primary btn-sm" onclick="finishSisa('${u.ulangan_id}')">${I('send', 'ic-sm')}Kirim & nilai</button></div>` : ''}
           ${SEL ? '' : `<div class="flex g8 mt16 wrap">${st.k === 'AKTIF' ? `<button class="btn btn-primary btn-sm" onclick="go('g-monitor',{id:'${u.ulangan_id}'})">${I('monitor', 'ic-sm')}Monitor Live</button><button class="btn btn-ghost btn-sm ink-err" title="Akhiri ujian sekarang" onclick="finishUjian('${u.ulangan_id}')">${I('flag', 'ic-sm')}Selesaikan</button>` : ''}
             ${u.selesai || ujMulai(u) ? `<button class="btn btn-secondary btn-sm" onclick="go('g-hasil',{id:'${u.ulangan_id}'})">${I('chart', 'ic-sm')}Hasil & Analisis</button>` : ''}${u.koreksi || (u.esai && ujMulai(u)) ? `<button class="btn btn-secondary btn-sm" onclick="go('g-koreksi',{id:'${u.ulangan_id}'})">${I('pen', 'ic-sm')}Koreksi Esai${u.koreksi ? ` <span class="badge">${u.koreksi}</span>` : ''}</button>` : ''}
             <button class="btn btn-ghost btn-sm" onclick="go('g-ujian-form',{id:'${u.ulangan_id}'})">${I('edit', 'ic-sm')}${st.k === 'DRAF' ? 'Lanjutkan' : 'Ubah'}</button>${canDel(u) ? `<button class="btn btn-ghost btn-sm ink-err ml-a" title="Hapus ujian" onclick="delUjian('${u.ulangan_id}')">${I('trash', 'ic-sm')}</button>` : ''}</div>`}</div>`; }).join('') || `<div class="card" style="grid-column:1/-1">${emptyState('exam', 'Belum ada ujian', 'Buat ujian CBT dari bank soal.', `<button class="btn btn-primary" onclick="go('g-ujian-form',{})">${I('plus')}Buat Ujian</button>`)}</div>`}</div>
@@ -750,6 +751,21 @@ function srvOld(min, fitur) {
   const v = String(cfg().version || '0').split('.').map(Number), m = min.split('.').map(Number);
   for (let i = 0; i < 3; i++) { if ((v[i] || 0) > m[i]) return false; if ((v[i] || 0) < m[i]) { toast(`${fitur} butuh server versi ${min} — server Anda masih versi ${cfg().version || '?'}. Ganti isi Kode.gs dengan versi terbaru lalu Terapkan → Kelola deployment → Versi baru.`, 'err', 9000); return true; } }
   return false;
+}
+/** Jumlah siswa yang sudah mulai tetapi belum terkirim (menurut database). */
+function ujSisa(u) { return Math.max(0, (u.dimulai || 0) - (u.selesai || 0)); }
+/** Ujian sudah selesai tetapi ada jawaban yang tertinggal (aplikasi siswa ditutup sebelum mengirim): kirim & nilai dari jawaban terakhir yang tersimpan. */
+function finishSisa(id) {
+  const u = G().ulangan.find((x) => x.ulangan_id === id);
+  if (!u || srvOld('2.6.1', 'Kirim & nilai jawaban yang tertinggal')) return;
+  confirmBox(`<b>${ujSisa(u)} siswa</b> sudah memulai <b>${esc(u.judul)}</b> tetapi jawabannya belum terkirim — biasanya karena aplikasi ditutup atau HP mati sebelum menekan Selesai.<br><br>Jawaban terakhir yang tersimpan otomatis akan dikirim dan dinilai sekarang.`, { title: 'Kirim & nilai jawaban yang tertinggal?', icon: 'send', yes: 'Kirim & Nilai' }).then((ok) => {
+    if (!ok) return;
+    toast('Mengirim & menilai jawaban yang tertinggal…', 'info', 5000);
+    call('ulangan.finish', { ulangan_id: id, segera: true }, { timeout: 120000 }).then((r) => {
+      toast(r.dikirim ? r.dikirim + ' jawaban siswa dikirim & dinilai.' : 'Tidak ada jawaban yang tertinggal di server — data sudah lengkap.', 'ok', 8000);
+      return refreshBoot();
+    }).catch(failToast);
+  });
 }
 /** Selesaikan ujian lebih awal: ujian ditutup, siswa yang sedang mengerjakan diberi 60 detik lalu jawabannya terkirim otomatis. */
 function finishUjian(id) {
