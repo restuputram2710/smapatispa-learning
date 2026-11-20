@@ -11,9 +11,12 @@
   <link rel="preconnect" href="https://script.googleusercontent.com">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500;600&amp;family=Plus+Jakarta+Sans:wght@600;700&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500;600&amp;family=Plus+Jakarta+Sans:wght@600;700&amp;display=swap"></noscript>
+  <link rel="stylesheet" href="css/style.css?v=19d6cf50c6">
   <script>
+    /* Versi tiap file (berubah otomatis setiap rilis) → browser menyimpan file selamanya & hanya mengunduh yang berubah. */
+    window.__SP_V__ = {"core":"ad645d9154","shell":"5873550e27","siswa":"36811efc46","guru":"2c526cf435","umum":"6d924d8c7a","admin":"27d8a4c73e","main":"58ec8a20c2"};
     /* Identitas aplikasi dari kunjungan terakhir → layar pembuka langsung bermerek tanpa menunggu server. */
     (function () {
       try { window.__CFG__ = JSON.parse(localStorage.getItem('sp_cfg') || 'null') || {}; } catch (e) { window.__CFG__ = {}; }
@@ -21,12 +24,19 @@
         var t = localStorage.getItem('sp_theme');
         if (t === 'dark' || t === '"dark"') document.documentElement.setAttribute('data-theme', 'dark');
       } catch (e) {}
+      /* Sudah pernah masuk → unduh modul halamannya bersamaan dengan file inti (tidak menunggu bergantian). */
+      try {
+        if (localStorage.getItem('sp_tok')) (localStorage.getItem('sp_mods') || 'siswa,guru,umum,admin').split(',').forEach(function (n) {
+          if (!window.__SP_V__[n]) return;
+          var l = document.createElement('link'); l.rel = 'preload'; l.as = 'script'; l.href = 'js/' + n + '.js?v=' + window.__SP_V__[n]; document.head.appendChild(l);
+        });
+      } catch (e) {}
     })();
     /* Pemeriksa pemuatan: bila ada file yang tidak termuat (mis. salah struktur folder di GitHub), tampilkan penyebabnya. */
     window.__SP_ERR__ = [];
     window.addEventListener('error', function (e) { if (e && e.message) window.__SP_ERR__.push(e.message + (e.filename ? ' — ' + e.filename.split('/').slice(-2).join('/') : '') + (e.lineno ? ':' + e.lineno : '')); });
     (function () {
-      var shown = false, need = ['config', 'core', 'shell', 'siswa', 'guru', 'umum', 'admin', 'main'];
+      var shown = false, need = ['config', 'core', 'shell', 'main'];   /* siswa, guru, umum, admin dimuat sesuai peran setelah masuk */
       function esc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
       /** Panel pesan di atas layar pembuka (gaya inline → tetap terbaca walau style.css gagal dimuat). */
       window.spPanel = function (title, body) {
@@ -47,7 +57,7 @@
       };
       setTimeout(function () {
         var s = document.getElementById('splash'); if (!s || s.classList.contains('hide')) return;
-        if (window.spCheckFiles() && window.__SP_ERR__.length) window.spPanel('Aplikasi gagal dimulai', '<p>Terjadi kesalahan saat memulai aplikasi. Kirimkan tangkapan layar ini ke pengembang.</p>');
+        if (window.spCheckFiles() && window.__SP_ERR__.length && !window.__SP_LOADING__) window.spPanel('Aplikasi gagal dimulai', '<p>Terjadi kesalahan saat memulai aplikasi. Kirimkan tangkapan layar ini ke pengembang.</p>');
       }, 5000);
       setTimeout(function () { var s = document.getElementById('splash'); if (s && !s.classList.contains('hide')) window.spPanel('Server lambat merespons', '<p>Aplikasi sudah termuat, tetapi server Google belum menjawab. Periksa koneksi internet lalu muat ulang halaman.</p>'); }, 40000);
     })();
@@ -164,9 +174,9 @@
 
   <!-- Layar pembuka (langsung bermerek dari konfigurasi server) -->
   <div id="splash">
-    <div class="logo" id="splashLogo"><svg class="ic ic-2x"><use href="#i-cap"/></svg></div>
+    <div class="logo" id="splashLogo"><svg class="ic ic-2x" aria-hidden="true"><use href="#i-cap"/></svg></div>
     <h1 id="splashName">SMAPATISPA LEARNING</h1>
-    <div class="ring" aria-label="Memuat"></div>
+    <div class="ring" role="status" aria-label="Memuat"></div>
   </div>
   <div class="top-loader" id="topLoader"><i></i></div>
 
@@ -190,14 +200,10 @@
   <div id="layers"></div>
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
-  <!-- Modul aplikasi (urutan penting, semua defer) -->
+  <!-- File inti (urutan penting, semua defer). Modul halaman siswa/guru/umum/admin dimuat otomatis sesuai peran setelah masuk. -->
   <script defer src="js/config.js"></script>
-  <script defer src="js/core.js"></script>
-  <script defer src="js/shell.js"></script>
-  <script defer src="js/siswa.js"></script>
-  <script defer src="js/guru.js"></script>
-  <script defer src="js/umum.js"></script>
-  <script defer src="js/admin.js"></script>
-  <script defer src="js/main.js"></script>
+  <script defer src="js/core.js?v=ad645d9154"></script>
+  <script defer src="js/shell.js?v=5873550e27"></script>
+  <script defer src="js/main.js?v=58ec8a20c2"></script>
 </body>
 </html>

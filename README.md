@@ -19,7 +19,12 @@ js/umum.js          presensi, wali kelas, agenda, laporan, akun, jadwal pelajara
 js/admin.js         dashboard admin, pengguna, data akademik, pengaturan
 js/main.js          titik mulai
 templates/          template import soal CBT (Word & Excel)
+vercel.json         aturan cache Vercel (file js/css berversi disimpan browser; config.js selalu diperiksa ulang)
+robots.txt          izin mesin pencari
 ```
+
+Layar masuk hanya memuat file inti (config, core, shell, main). Modul halaman (siswa, guru, umum, admin)
+dimuat otomatis sesuai peran setelah masuk — jangan dihapus walau tidak terlihat di layar masuk.
 
 ## Memperbarui
 ```

@@ -1,0 +1,133 @@
+{
+ "headers": [
+  {
+   "source": "/css/style.css",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/admin.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/core.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/guru.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/main.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/shell.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/siswa.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/umum.js",
+   "has": [
+    {
+     "type": "query",
+     "key": "v"
+    }
+   ],
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=31536000, immutable"
+    }
+   ]
+  },
+  {
+   "source": "/js/config.js",
+   "headers": [
+    {
+     "key": "Cache-Control",
+     "value": "public, max-age=0, must-revalidate"
+    }
+   ]
+  }
+ ]
+}
